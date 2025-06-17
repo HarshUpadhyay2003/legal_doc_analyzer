@@ -3,10 +3,10 @@ from datetime import timedelta
 
 class Config:
     # Basic Flask config
-    SECRET_KEY = os.environ.get('SECRET_KEY', 'your-secret-key-here')
+    SECRET_KEY = os.environ.get('SECRET_KEY', 'super-secret-not-for-production')
     
     # JWT config
-    JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', 'your-jwt-secret-key-here')
+    JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', 'another-super-secret-jwt-key')
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=1)
     
     # Database config

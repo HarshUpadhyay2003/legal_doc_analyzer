@@ -1,31 +1,32 @@
+import os
 from flask import Flask
-from flask_cors import CORS
 from flask_jwt_extended import JWTManager
+from flask_cors import CORS
 from app.routes.routes import main  # ✅ Make sure this works
 from app.database import init_db
-import os
+import logging
 
 jwt = JWTManager()
 
-def create_app(config=None):
+def create_app(config_object):
     app = Flask(__name__)
+    app.config.from_object(config_object) # Use from_object to load config from the class instance
 
-    # Default configuration
-    app.config['JWT_SECRET_KEY'] = 'your-secret-key'  # Change this to something secure
-    app.config['JWT_ACCESS_TOKEN_EXPIRES'] = False  # Optional: Tokens don't expire for now
-    
-    # Update with provided configuration
-    if config:
-        app.config.update(config)
-
-    # 🔧 Optional: Enable CORS if frontend is on another origin
-    CORS(app)
+    # Configure logging
+    app.logger.setLevel(logging.DEBUG)
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+    app.logger.addHandler(handler)
 
     # 🧱 Initialize DB
     init_db()
 
     # 🔐 Initialize JWT
     jwt.init_app(app)
+
+    # 🔧 Enable CORS for specific origin
+    CORS(app, resources={r"/*": {"origins": "http://localhost:8080"}})
 
     # 📦 Register routes
     app.register_blueprint(main)

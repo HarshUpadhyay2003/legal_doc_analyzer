@@ -8,7 +8,7 @@ from app.utils.cache import cache_qa_result
 def get_qa_model():
     try:
         model = AutoModelForSeq2SeqLM.from_pretrained("TheGod-2003/legal_QA_model")
-        tokenizer = AutoTokenizer.from_pretrained("TheGod-2003/legal_QA_model")
+        tokenizer = AutoTokenizer.from_pretrained("TheGod-2003/legal_QA_model", use_fast=False)
         return model, tokenizer
     except Exception as e:
         logging.error(f"Error initializing QA model: {str(e)}")

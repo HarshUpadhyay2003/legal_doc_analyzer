@@ -1,5 +1,6 @@
 import functools
 from flask import jsonify
+import logging
 
 def handle_errors(func):
     @functools.wraps(func)
@@ -7,7 +8,6 @@ def handle_errors(func):
         try:
             return func(*args, **kwargs)
         except Exception as e:
-            # Optional: log the error here (using logging or print)
-            print(f"Unhandled exception in {func.__name__}: {e}")
+            logging.exception(f"Unhandled exception in {func.__name__}")
             return jsonify({"success": False, "error": "Internal server error"}), 500
     return wrapper

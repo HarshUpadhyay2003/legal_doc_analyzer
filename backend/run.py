@@ -6,7 +6,7 @@ from config import config
 
 # Get environment from environment variable
 env = os.environ.get('FLASK_ENV', 'development')
-app = create_app(config[env])
+app = create_app(config[env])  # Pass the config class, not an instance
 
 # Configure logging
 if not app.debug:

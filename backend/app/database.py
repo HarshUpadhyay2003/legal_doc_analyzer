@@ -1,48 +1,62 @@
 import sqlite3
+import os
+import logging
 from datetime import datetime
 import json
-import logging
 
-DB_NAME = "legal_docs.db"
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+DB_PATH = os.path.join(BASE_DIR, 'legal_docs.db')
 
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    
+    """Initialize the database with required tables"""
     try:
-        # Create main documents table
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS documents (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                title TEXT,
-                upload_time TEXT,
-                full_text TEXT,
-                summary TEXT,
-                clauses TEXT,
-                features TEXT,
-                context_analysis TEXT
-            )
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        # Create users table
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
         ''')
-        
-        # Create FTS5 virtual table
-        c.execute('''
-            CREATE VIRTUAL TABLE IF NOT EXISTS document_fts 
-            USING fts5(
-                title, 
-                content, 
-                summary
-            )
+
+        # Create documents table
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            full_text TEXT,
+            summary TEXT,
+            clauses TEXT,
+            features TEXT,
+            context_analysis TEXT,
+            file_path TEXT,
+            upload_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
         ''')
-        
+
         conn.commit()
-    except sqlite3.Error as e:
-        logging.error(f"Database initialization error: {str(e)}")
+        logging.info("Database initialized successfully")
+    except Exception as e:
+        logging.error(f"Error initializing database: {str(e)}")
         raise
     finally:
         conn.close()
 
+def get_db_connection():
+    """Get a database connection"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+# Initialize database when module is imported
+init_db()
+
 def search_documents(query, search_type='all'):
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     
     try:
@@ -82,84 +96,66 @@ def search_documents(query, search_type='all'):
     finally:
         conn.close()
 
-def save_document(title, full_text, summary, clauses, features=None, context_analysis=None):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    
+def save_document(title, full_text, summary, clauses, features, context_analysis, file_path):
+    """Save a document to the database"""
     try:
-        # Insert into main table
-        c.execute('''
-            INSERT INTO documents (
-                title, upload_time, full_text, summary, clauses, 
-                features, context_analysis
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            title,
-            datetime.utcnow().isoformat(),
-            full_text,
-            summary,
-            json.dumps(clauses),
-            json.dumps(features or {}),
-            json.dumps(context_analysis or {})
-        ))
-        
-        doc_id = c.lastrowid
-        
-        # Insert into FTS5 index
-        c.execute('''
-            INSERT INTO document_fts(rowid, title, content, summary)
-            VALUES (?, ?, ?, ?)
-        ''', (
-            doc_id,
-            title,
-            full_text,
-            summary
-        ))
-        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+        INSERT INTO documents (title, full_text, summary, clauses, features, context_analysis, file_path)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (title, full_text, summary, str(clauses), str(features), str(context_analysis), file_path))
         conn.commit()
-        return doc_id
-    except sqlite3.Error as e:
-        conn.rollback()
-        logging.error(f"Save document error: {str(e)}")
+        return cursor.lastrowid
+    except Exception as e:
+        logging.error(f"Error saving document: {str(e)}")
         raise
     finally:
         conn.close()
 
 def get_all_documents():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute('SELECT id, title, upload_time FROM documents ORDER BY upload_time DESC')
-    rows = c.fetchall()
-    conn.close()
-
-    return [
-        {"id": row[0], "title": row[1], "upload_time": row[2]}
-        for row in rows
-    ]
+    """Get all documents from the database"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM documents ORDER BY upload_time DESC')
+        documents = [dict(row) for row in cursor.fetchall()]
+        return documents
+    except Exception as e:
+        logging.error(f"Error fetching documents: {str(e)}")
+        raise
+    finally:
+        conn.close()
 
 def get_document_by_id(doc_id):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute('''
-        SELECT id, title, upload_time, full_text, summary, clauses, 
-               features, context_analysis 
-        FROM documents 
-        WHERE id = ?
-    ''', (doc_id,))
-    row = c.fetchone()
-    conn.close()
+    """Get a specific document by ID"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM documents WHERE id = ?', (doc_id,))
+        document = cursor.fetchone()
+        return dict(document) if document else None
+    except Exception as e:
+        logging.error(f"Error fetching document {doc_id}: {str(e)}")
+        raise
+    finally:
+        conn.close()
 
-    if row:
-        return {
-            "id": row[0],
-            "title": row[1],
-            "upload_time": row[2],
-            "full_text": row[3],
-            "summary": row[4],
-            "clauses": json.loads(row[5] or "[]"),
-            "features": json.loads(row[6] or "{}"),
-            "context_analysis": json.loads(row[7] or "{}")
-        }
-    else:
-        return None
+def delete_document(doc_id):
+    """Delete a document from the database and return its file_path"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        # Fetch the file_path before deleting
+        cursor.execute('SELECT file_path FROM documents WHERE id = ?', (doc_id,))
+        row = cursor.fetchone()
+        file_path = row[0] if row and row[0] else None
+        # Now delete the document
+        cursor.execute('DELETE FROM documents WHERE id = ?', (doc_id,))
+        conn.commit()
+        return file_path
+    except Exception as e:
+        logging.error(f"Error deleting document {doc_id}: {str(e)}")
+        raise
+    finally:
+        conn.close()
