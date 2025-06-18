@@ -17,6 +17,7 @@ from app.utils.enhanced_legal_processor import EnhancedLegalProcessor
 from app.utils.legal_domain_features import LegalDomainFeatures
 from app.utils.context_understanding import ContextUnderstanding
 import logging
+import textract
 
 main = Blueprint("main", __name__)
 
@@ -33,6 +34,23 @@ UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
+ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx'}
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def extract_text_from_file(file_path):
+    ext = file_path.rsplit('.', 1)[1].lower()
+    if ext == 'pdf':
+        return extract_text_from_pdf(file_path)
+    elif ext in ['doc', 'docx']:
+        try:
+            text = textract.process(file_path)
+            return text.decode('utf-8')
+        except Exception as e:
+            raise Exception(f"Failed to extract text from {ext.upper()} file: {str(e)}")
+    else:
+        raise Exception("Unsupported file type for text extraction.")
 
 @main.route('/upload', methods=['POST'])
 @jwt_required()
@@ -44,6 +62,9 @@ def upload_file():
         file = request.files['file']
         if file.filename == '':
             return jsonify({'error': 'No selected file'}), 400
+
+        if not allowed_file(file.filename):
+            return jsonify({'error': 'File type not allowed. Only PDF, DOC, DOCX are supported.'}), 400
 
         # Save file first
         filename = secure_filename(file.filename)
@@ -201,6 +222,7 @@ def register():
     data = request.get_json()
     username = data.get("username")
     password = data.get("password")
+    email = data.get("email")
 
     if not username or not password:
         logging.warning("Registration attempt with missing username or password.")
@@ -212,10 +234,10 @@ def register():
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", (username, hashed_pw))
+        cursor.execute("INSERT INTO users (username, password_hash, email) VALUES (?, ?, ?)", (username, hashed_pw, email))
         conn.commit()
         logging.info(f"User {username} registered successfully.")
-        return jsonify({"message": "User registered successfully"}), 201
+        return jsonify({"message": "User registered successfully", "username": username, "email": email}), 201
     except sqlite3.IntegrityError:
         logging.warning(f"Registration attempt for existing username: {username}")
         return jsonify({"error": "Username already exists"}), 409
@@ -225,6 +247,7 @@ def register():
     finally:
         if conn:
             conn.close()
+    
 
 
 @main.route('/login', methods=['POST'])
@@ -242,33 +265,36 @@ def login():
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        cursor.execute("SELECT password_hash FROM users WHERE username = ?", (username,))
+        # Allow login with either username or email
+        cursor.execute(
+            "SELECT password_hash, email, username FROM users WHERE username = ? OR email = ?",
+            (username, username)
+        )
         user = cursor.fetchone()
         conn.close()
 
         logging.debug(f"Login attempt for user: {username}")
         if user:
             stored_password_hash = user[0]
-            logging.debug(f"Stored password hash for {username}: {stored_password_hash}")
+            user_email = user[1]
+            user_username = user[2]
             password_match = check_password_hash(stored_password_hash, password)
-            logging.debug(f"Password match for {username}: {password_match}")
-
             if password_match:
-                access_token = create_access_token(identity=username)
-                logging.info(f"User {username} logged in successfully.")
-                return jsonify(access_token=access_token), 200
+                access_token = create_access_token(identity=user_username)
+                logging.info(f"User {user_username} logged in successfully.")
+                return jsonify(access_token=access_token, username=user_username, email=user_email), 200
             else:
-                logging.warning(f"Failed login attempt for username: {username} - Incorrect password.")
+                logging.warning(f"Failed login attempt for username/email: {username} - Incorrect password.")
                 return jsonify({"error": "Bad username or password"}), 401
         else:
-            logging.warning(f"Failed login attempt: Username {username} not found.")
+            logging.warning(f"Failed login attempt: Username or email {username} not found.")
             return jsonify({"error": "Bad username or password"}), 401
     except Exception as e:
         logging.error(f"Database error during login: {str(e)}", exc_info=True)
         return jsonify({"error": f"Database error: {str(e)}"}), 500
     finally:
         if conn:
-            conn.close();
+            conn.close()
 
 
 @main.route('/process-document/<int:doc_id>', methods=['POST'])
@@ -283,7 +309,7 @@ def process_document(doc_id):
         file_path = document['file_path']
         
         # Extract text
-        text = extract_text_from_pdf(file_path)
+        text = extract_text_from_file(file_path)
         if not text:
             return jsonify({'error': 'Could not extract text from file'}), 400
 

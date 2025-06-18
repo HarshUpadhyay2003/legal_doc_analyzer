@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -49,6 +49,14 @@ interface Document {
   file_path?: string; // Add file_path from backend
 }
 
+function formatFileSize(bytes: number): string {
+  if (!bytes || isNaN(bytes)) return 'N/A';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
 export const DocumentsPage: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [dragActive, setDragActive] = useState(false);
@@ -60,6 +68,8 @@ export const DocumentsPage: React.FC = () => {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isLoadingDocuments, setIsLoadingDocuments] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [isPdfLoading, setIsPdfLoading] = useState(false);
 
   const getAuthHeader = () => {
     const token = localStorage.getItem('jwt_token');
@@ -72,6 +82,13 @@ export const DocumentsPage: React.FC = () => {
   useEffect(() => {
     fetchDocuments();
   }, []);
+
+  useEffect(() => {
+    if (!isViewDialogOpen && pdfUrl) {
+      URL.revokeObjectURL(pdfUrl);
+      setPdfUrl(null);
+    }
+  }, [isViewDialogOpen, pdfUrl]);
 
   const fetchDocuments = async () => {
     setIsLoadingDocuments(true);
@@ -87,10 +104,10 @@ export const DocumentsPage: React.FC = () => {
         id: doc.id,
         title: doc.title,
         upload_time: new Date(doc.upload_time).toLocaleDateString(),
-        status: 'Processed', // Assuming all fetched documents are processed
-        size: 'N/A', // Size not returned by backend, need to update backend or estimate
+        status: 'Processed',
+        size: doc.size ? formatFileSize(doc.size) : 'N/A',
         type: doc.title.split('.').pop()?.toUpperCase() || 'Unknown',
-        file_path: doc.file_path, // Backend might return this, but not in current list_documents
+        file_path: doc.file_path,
       }));
       setDocuments(formattedDocs);
     } catch (error) {
@@ -153,19 +170,22 @@ export const DocumentsPage: React.FC = () => {
       };
 
       xhr.onload = () => {
-        setIsUploading(false);
         if (xhr.status === 200) {
           const response = JSON.parse(xhr.responseText);
-          if (response.success) {
+          // Check for successful upload based on the actual response format
+          if (response.status === "processing" || response.message === "File uploaded successfully") {
             toast({
               title: "Upload Successful",
-              description: `${response.filename} has been uploaded and processed.`, 
+              description: `${response.title} has been uploaded and is being processed.`, 
             });
-            fetchDocuments();
+            // Add a small delay to ensure server has processed the file
+            setTimeout(() => {
+              fetchDocuments();
+            }, 1000);
           } else {
             toast({
               title: "Upload Failed",
-              description: response.error || "An unknown error occurred.",
+              description: response.message || "An unknown error occurred.",
               variant: "destructive",
             });
           }
@@ -173,10 +193,11 @@ export const DocumentsPage: React.FC = () => {
           const errorResponse = JSON.parse(xhr.responseText);
           toast({
             title: "Upload Failed",
-            description: errorResponse.error || `Server responded with status ${xhr.status}.`,
+            description: errorResponse.message || `Server responded with status ${xhr.status}.`,
             variant: "destructive",
           });
         }
+        setIsUploading(false);
       };
 
       xhr.onerror = () => {
@@ -214,10 +235,74 @@ export const DocumentsPage: React.FC = () => {
     return variants[status as keyof typeof variants] || 'bg-gray-100 text-gray-800';
   };
 
-  const handleViewDocument = async (doc: Document) => {
+  const handleViewDocument = useCallback(async (doc: Document) => {
     setSelectedDocument(doc);
     setIsViewDialogOpen(true);
-  };
+    setIsPdfLoading(true);
+    setPdfUrl(null);
+
+    const ext = doc.title.split('.').pop()?.toLowerCase();
+
+    try {
+      const token = localStorage.getItem('jwt_token');
+      const response = await fetch(`${BASE_API_URL}/documents/view/${doc.title}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        toast({
+          title: "View Failed",
+          description: "Could not fetch document for preview.",
+          variant: "destructive",
+        });
+        setPdfUrl(null);
+        setIsPdfLoading(false);
+        return;
+      }
+
+      const blob = await response.blob();
+
+      if (ext === 'pdf') {
+        const url = URL.createObjectURL(blob);
+        setPdfUrl(url);
+      } else if (ext === 'doc' || ext === 'docx') {
+        // Download the file
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = doc.title;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+
+        toast({
+          title: "Download Started",
+          description: "Preview not supported for DOC/DOCX. File downloaded.",
+        });
+        setPdfUrl(null);
+        setIsViewDialogOpen(false); // Optionally close the dialog
+      } else {
+        setPdfUrl(null);
+        toast({
+          title: "Unsupported File",
+          description: "This file type is not supported for preview or download.",
+          variant: "destructive",
+        });
+      }
+    } catch (err) {
+      toast({
+        title: "View Error",
+        description: "An error occurred while fetching the document.",
+        variant: "destructive",
+      });
+      setPdfUrl(null);
+    } finally {
+      setIsPdfLoading(false);
+    }
+  }, []);
 
   const handleDeleteDocument = (doc: Document) => {
     setSelectedDocument(doc);
@@ -351,7 +436,7 @@ export const DocumentsPage: React.FC = () => {
               Drag and drop your documents here
             </h3>
             <p className="text-gray-600 mb-4">
-              or click to browse files. Supports PDF, DOC, DOCX files up to 10MB
+              or click to browse files. Supports only PDF files up to 10MB
             </p>
             <Button variant="outline">
               Browse Files
@@ -462,9 +547,13 @@ export const DocumentsPage: React.FC = () => {
             <DialogTitle>{selectedDocument?.title}</DialogTitle>
           </DialogHeader>
           <div className="flex-1 overflow-auto mt-4">
-            {selectedDocument?.title && selectedDocument?.file_path ? (
+            {isPdfLoading ? (
+              <div className="flex items-center justify-center h-full">
+                <span className="text-gray-500">Loading document preview...</span>
+              </div>
+            ) : selectedDocument?.title && pdfUrl ? (
               <iframe
-                src={`${BASE_API_URL}/documents/view/${selectedDocument.title}`}
+                src={pdfUrl}
                 className="w-full h-full"
                 title={selectedDocument.title}
               />

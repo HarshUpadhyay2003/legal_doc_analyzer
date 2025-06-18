@@ -84,7 +84,7 @@ export const RegisterForm: React.FC<RegisterFormProps> = ({ onSwitchToLogin, onR
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ username: formData.email, password: formData.password }),
+        body: JSON.stringify({ username: formData.fullName, password: formData.password, email: formData.email }),
       });
 
       const data = await response.json();

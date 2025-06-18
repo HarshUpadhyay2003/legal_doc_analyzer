@@ -15,55 +15,43 @@ interface LoginFormProps {
 }
 
 export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister, onLoginSuccess }) => {
-  const [email, setEmail] = useState('');
+  const [loginId, setLoginId] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [errors, setErrors] = useState<{ email?: string; password?: string; general?: string }>({});
+  const [errors, setErrors] = useState<{ loginId?: string; password?: string; general?: string }>({});
 
   const validateForm = () => {
     const newErrors: typeof errors = {};
-    
-    if (!email) {
-      newErrors.email = 'Email is required';
-    } else if (!/\S+@\S+\.\S+/.test(email)) {
-      newErrors.email = 'Email is invalid';
+    if (!loginId) {
+      newErrors.loginId = 'Username or Email is required';
     }
-    
     if (!password) {
       newErrors.password = 'Password is required';
     } else if (password.length < 6) {
       newErrors.password = 'Password must be at least 6 characters';
     }
-    
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
     if (!validateForm()) return;
-    
     setIsLoading(true);
-    setErrors({}); // Clear previous errors
-    
+    setErrors({});
     try {
       const response = await fetch(`${BASE_API_URL}/login`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ username: email, password }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: loginId, password }),
       });
-
       const data = await response.json();
-      console.log("Backend login response data:", data);
-
       if (response.ok) {
-        // Assuming your backend returns a token in 'access_token'
         localStorage.setItem('jwt_token', data.access_token);
+        if (data.username) localStorage.setItem('username', data.username);
+        if (data.email) localStorage.setItem('email', data.email);
         toast({
           title: "Login Successful",
           description: "Welcome to JuriSense!",
@@ -78,7 +66,6 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister, onLogi
         });
       }
     } catch (error) {
-      console.error("Login error:", error);
       setErrors({ general: 'Network error or server unreachable. Please try again later.' });
       toast({
         title: "Login Error",
@@ -106,20 +93,19 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister, onLogi
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-2">
-            <Label htmlFor="email" className="text-sm font-medium text-gray-700">
-              Email Address
+            <Label htmlFor="loginId" className="text-sm font-medium text-gray-700">
+              Username or Email
             </Label>
             <Input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className={`${errors.email ? 'border-red-500' : ''}`}
-              placeholder="Enter your email"
+              id="loginId"
+              type="text"
+              value={loginId}
+              onChange={(e) => setLoginId(e.target.value)}
+              className={`${errors.loginId ? 'border-red-500' : ''}`}
+              placeholder="Enter your username or email"
             />
-            {errors.email && <p className="text-sm text-red-600">{errors.email}</p>}
+            {errors.loginId && <p className="text-sm text-red-600">{errors.loginId}</p>}
           </div>
-          
           <div className="space-y-2">
             <Label htmlFor="password" className="text-sm font-medium text-gray-700">
               Password
@@ -147,7 +133,6 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister, onLogi
             </div>
             {errors.password && <p className="text-sm text-red-600">{errors.password}</p>}
           </div>
-          
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
               <Checkbox 
@@ -166,13 +151,11 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister, onLogi
               Forgot Password?
             </button>
           </div>
-          
           {errors.general && (
             <div className="bg-red-50 border border-red-200 rounded-md p-3">
               <p className="text-sm text-red-600">{errors.general}</p>
             </div>
           )}
-          
           <Button 
             type="submit" 
             className="w-full bg-blue-600 hover:bg-blue-700 text-white h-11"
@@ -187,7 +170,6 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister, onLogi
               'Sign In'
             )}
           </Button>
-          
           <div className="text-center">
             <span className="text-sm text-gray-600">
               Don't have an account?{' '}

@@ -1,14 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, Outlet } from 'react-router-dom';
 import { Toaster } from "@/components/ui/toaster";
 import { LoginForm } from '@/components/auth/LoginForm';
 import { RegisterForm } from '@/components/auth/RegisterForm';
 import { MainLayout } from '@/components/layout/MainLayout';
-import { Dashboard } from '@/components/dashboard/Dashboard';
-import { DocumentsPage } from '@/components/documents/DocumentsPage';
-import { QAPage } from '@/components/qa/QAPage';
-import { SearchPage } from '@/components/search/SearchPage';
-import { SettingsPage } from '@/components/settings/SettingsPage';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 
 interface IndexProps {
@@ -19,25 +14,18 @@ interface IndexProps {
 
 const Index: React.FC<IndexProps> = ({ isAuthenticated, onLoginSuccess, onLogout }) => {
   const [showRegister, setShowRegister] = useState(false);
-  const [currentPage, setCurrentPage] = useState('dashboard');
   const location = useLocation();
   const navigate = useNavigate();
 
-  useEffect(() => {
-    if (isAuthenticated) {
-      if (location.pathname === '/') {
-        setCurrentPage('dashboard');
-      } else if (location.pathname === '/documents') {
-        setCurrentPage('documents');
-      } else if (location.pathname === '/question-answering') {
-        setCurrentPage('question-answering');
-      } else if (location.pathname === '/search') {
-        setCurrentPage('search');
-      } else if (location.pathname === '/settings') {
-        setCurrentPage('settings');
-      }
-    }
-  }, [isAuthenticated, location.pathname]);
+  // Get current page from pathname
+  const getCurrentPage = (pathname: string) => {
+    if (pathname === '/') return 'dashboard';
+    return pathname.substring(1); // Remove leading slash
+  };
+
+  const handleNavigate = (page: string) => {
+    navigate(`/${page === 'dashboard' ? '' : page}`);
+  };
 
   if (!isAuthenticated) {
     return (
@@ -64,12 +52,12 @@ const Index: React.FC<IndexProps> = ({ isAuthenticated, onLoginSuccess, onLogout
 
   return (
     <ThemeProvider>
-      <MainLayout currentPage={currentPage} onNavigate={setCurrentPage} onLogout={onLogout}>
-        {currentPage === 'dashboard' && <Dashboard onNavigate={setCurrentPage} />}
-        {currentPage === 'documents' && <DocumentsPage />}
-        {currentPage === 'question-answering' && <QAPage />}
-        {currentPage === 'search' && <SearchPage />}
-        {currentPage === 'settings' && <SettingsPage />}
+      <MainLayout 
+        currentPage={getCurrentPage(location.pathname)} 
+        onNavigate={handleNavigate} 
+        onLogout={onLogout}
+      >
+        <Outlet />
         <Toaster />
       </MainLayout>
     </ThemeProvider>

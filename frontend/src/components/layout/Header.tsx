@@ -33,6 +33,8 @@ export const Header: React.FC<HeaderProps> = ({ onToggleSidebar, sidebarCollapse
   const [searchQuery, setSearchQuery] = useState('');
   const [notificationCount] = useState(3);
   const { theme, setTheme, isDark } = useTheme();
+  const username = localStorage.getItem('username') || 'User';
+  const email = localStorage.getItem('email') || '';
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -145,8 +147,8 @@ export const Header: React.FC<HeaderProps> = ({ onToggleSidebar, sidebarCollapse
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56 bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
             <div className="px-2 py-1.5">
-              <p className="text-sm font-medium dark:text-white">John Doe</p>
-              <p className="text-xs text-gray-500 dark:text-gray-400">john@example.com</p>
+              <p className="text-sm font-medium dark:text-white">{username}</p>
+              {email && <p className="text-xs text-gray-500 dark:text-gray-400">{email}</p>}
             </div>
             <DropdownMenuSeparator className="dark:bg-gray-700" />
             <DropdownMenuItem onClick={handleProfileClick} className="dark:text-white dark:hover:bg-gray-700">

@@ -15,12 +15,13 @@ def init_db():
 
         # Create users table
         cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
+           CREATE TABLE IF NOT EXISTS users (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       username TEXT UNIQUE NOT NULL,
+       email TEXT UNIQUE NOT NULL,
+       password_hash TEXT NOT NULL,
+       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+   )
         ''')
 
         # Create documents table
@@ -114,12 +115,18 @@ def save_document(title, full_text, summary, clauses, features, context_analysis
         conn.close()
 
 def get_all_documents():
-    """Get all documents from the database"""
+    """Get all documents from the database, including file size if available"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute('SELECT * FROM documents ORDER BY upload_time DESC')
         documents = [dict(row) for row in cursor.fetchall()]
+        for doc in documents:
+            file_path = doc.get('file_path')
+            if file_path and os.path.exists(file_path):
+                doc['size'] = os.path.getsize(file_path)
+            else:
+                doc['size'] = None
         return documents
     except Exception as e:
         logging.error(f"Error fetching documents: {str(e)}")

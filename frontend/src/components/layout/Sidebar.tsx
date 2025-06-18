@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { 
   Scale, 
@@ -34,6 +33,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   collapsed, 
   onToggleCollapse 
 }) => {
+  const username = localStorage.getItem('username') || 'User';
+  const email = localStorage.getItem('email') || '';
   return (
     <div className={`fixed left-0 top-0 h-full bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col transition-all duration-300 z-50 ${
       collapsed ? 'w-16' : 'w-64'
@@ -88,21 +89,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </nav>
 
       {/* User Profile */}
-      <div className="p-4 border-t border-gray-200 dark:border-gray-700">
-        <div className={`flex items-center ${collapsed ? 'justify-center' : 'space-x-3'}`}>
-          <Avatar className="h-8 w-8">
-            <AvatarImage src="/placeholder-avatar.jpg" />
-            <AvatarFallback className="bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300">
-              <User className="h-4 w-4" />
-            </AvatarFallback>
-          </Avatar>
-          {!collapsed && (
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-900 dark:text-white truncate">John Doe</p>
-              <p className="text-xs text-gray-500 dark:text-gray-400 truncate">john@example.com</p>
-            </div>
-          )}
-        </div>
+      <div className={`flex items-center ${collapsed ? 'justify-center' : 'space-x-3' } p-4`}>
+        <Avatar className="h-8 w-8">
+          <AvatarImage src="/placeholder-avatar.jpg" />
+          <AvatarFallback className="bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300">
+            <User className="h-4 w-4" />
+          </AvatarFallback>
+        </Avatar>
+        {!collapsed && (
+          <div className="flex-1 min-w-0 ">
+            <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{username}</p>
+            {email && <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{email}</p>}
+          </div>
+        )}
       </div>
     </div>
   );
