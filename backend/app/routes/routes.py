@@ -340,3 +340,33 @@ def process_document(doc_id):
         logging.error(f"Error processing document: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+
+@main.route('/documents/summary/<int:doc_id>', methods=['POST'])
+@jwt_required()
+def generate_document_summary(doc_id):
+    try:
+        doc = get_document_by_id(doc_id)
+        if not doc:
+            return jsonify({"error": "Document not found"}), 404
+        # If summary exists and is not empty, return it
+        summary = doc.get('summary', '')
+        if summary and summary.strip() and summary != 'Processing...':
+            return jsonify({"summary": summary}), 200
+        file_path = doc.get('file_path', '')
+        if not file_path or not os.path.exists(file_path):
+            return jsonify({"error": "File not found for this document"}), 404
+        # Extract text from file (PDF, DOC, DOCX)
+        text = extract_text_from_file(file_path)
+        if not text.strip():
+            return jsonify({"error": "No text available for summarization"}), 400
+        summary = generate_summary(text)
+        # Save the summary to the database
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute('UPDATE documents SET summary = ? WHERE id = ?', (summary, doc_id))
+        conn.commit()
+        conn.close()
+        return jsonify({"summary": summary}), 200
+    except Exception as e:
+        return jsonify({"error": f"Error generating summary: {str(e)}"}), 500
+

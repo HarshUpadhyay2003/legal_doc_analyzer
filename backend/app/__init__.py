@@ -26,7 +26,7 @@ def create_app(config_object):
     jwt.init_app(app)
 
     # 🔧 Enable CORS for specific origin
-    CORS(app, resources={r"/*": {"origins": "http://localhost:8080"}})
+    CORS(app, resources={r"/*": {"origins": ["http://localhost:8080"]}}, supports_credentials=True)
 
     # 📦 Register routes
     app.register_blueprint(main)

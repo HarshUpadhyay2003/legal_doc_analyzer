@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Upload, Search, FileText, MoreHorizontal, Eye, Download, Trash2, Loader2 } from 'lucide-react';
+import { Upload, Search, FileText, MoreHorizontal, Eye, Download, Trash2, Loader2, Copy, Minus, X } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,6 +36,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { toast } from '@/hooks/use-toast';
+import { Calendar } from '@/components/ui/calendar';
+import { format } from 'date-fns';
 
 const BASE_API_URL = 'http://localhost:5000'; // Adjust if your backend is on a different URL/port
 
@@ -70,6 +72,19 @@ export const DocumentsPage: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
+  const [isSummaryDialogOpen, setIsSummaryDialogOpen] = useState(false);
+  const [isSummaryMinimized, setIsSummaryMinimized] = useState(false);
+  const [summary, setSummary] = useState<string | null>(null);
+  const [isSummaryLoading, setIsSummaryLoading] = useState(false);
+  const [summaryDoc, setSummaryDoc] = useState<Document | null>(null);
+  const [summaryCache, setSummaryCache] = useState<{ [docId: number]: string }>({});
+  const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false);
+  const [filterType, setFilterType] = useState<string>('');
+  const [filterStatus, setFilterStatus] = useState<string>('');
+  const [filterName, setFilterName] = useState<string>('');
+  const [filterDate, setFilterDate] = useState<Date | null>(null);
+  const [recentOnly, setRecentOnly] = useState(false);
+  const [recentDocs, setRecentDocs] = useState<number[]>([]); // store recently accessed doc IDs
 
   const getAuthHeader = () => {
     const token = localStorage.getItem('jwt_token');
@@ -136,8 +151,10 @@ export const DocumentsPage: React.FC = () => {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    // Handle file drop
-    console.log('Files dropped:', e.dataTransfer.files);
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      handleFileUpload(files[0]);
+    }
   };
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -240,6 +257,7 @@ export const DocumentsPage: React.FC = () => {
     setIsViewDialogOpen(true);
     setIsPdfLoading(true);
     setPdfUrl(null);
+    setRecentDocs((prev) => [doc.id, ...prev.filter(id => id !== doc.id)].slice(0, 10));
 
     const ext = doc.title.split('.').pop()?.toLowerCase();
 
@@ -385,10 +403,87 @@ export const DocumentsPage: React.FC = () => {
     }
   };
 
-  const filteredDocuments = documents.filter(doc =>
-    doc.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    doc.type.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const handleViewSummary = async (doc: Document) => {
+    setSummaryDoc(doc);
+    setIsSummaryDialogOpen(true);
+    setIsSummaryMinimized(false);
+    setIsSummaryLoading(true);
+    setSummary(null);
+    if (summaryCache[doc.id]) {
+      setSummary(summaryCache[doc.id]);
+      setIsSummaryLoading(false);
+      return;
+    }
+    try {
+      const response = await fetch(`${BASE_API_URL}/documents/summary/${doc.id}`, {
+        method: 'POST',
+        headers: {
+          ...getAuthHeader(),
+          'Content-Type': 'application/json',
+        },
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      setSummary(data.summary);
+      setSummaryCache((prev) => ({ ...prev, [doc.id]: data.summary }));
+      // Notify user if minimized
+      if (isSummaryMinimized) {
+        toast({
+          title: 'Summary Ready',
+          description: `Summary for ${doc.title} is ready. Click to view.`,
+          action: (
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsSummaryDialogOpen(true);
+                setIsSummaryMinimized(false);
+              }}
+            >
+              View
+            </Button>
+          ),
+        });
+      }
+    } catch (error) {
+      toast({
+        title: 'Summary Error',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
+      setSummary(null);
+    } finally {
+      setIsSummaryLoading(false);
+    }
+  };
+
+  const handleCopySummary = () => {
+    if (summary) {
+      navigator.clipboard.writeText(summary);
+      toast({
+        title: 'Copied',
+        description: 'Summary copied to clipboard.',
+      });
+    }
+  };
+
+  const filteredDocuments = documents.filter(doc => {
+    // Filter by name
+    if (filterName && !doc.title.toLowerCase().includes(filterName.toLowerCase())) return false;
+    // Filter by type
+    if (filterType && doc.type.toLowerCase() !== filterType.toLowerCase()) return false;
+    // Filter by status
+    if (filterStatus && doc.status.toLowerCase() !== filterStatus.toLowerCase()) return false;
+    // Filter by date
+    if (filterDate && doc.upload_time !== format(filterDate, 'M/d/yyyy')) return false;
+    // Filter by recent
+    if (recentOnly && !recentDocs.includes(doc.id)) return false;
+    // Also apply search term
+    if (searchTerm && !doc.title.toLowerCase().includes(searchTerm.toLowerCase()) && !doc.type.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+    return true;
+  });
 
   return (
     <div className="p-6 space-y-6">
@@ -463,7 +558,7 @@ export const DocumentsPage: React.FC = () => {
                 />
               </div>
             </div>
-            <Button variant="outline">Filter</Button>
+            <Button variant="outline" onClick={() => setIsFilterDialogOpen(true)}>Filter</Button>
           </div>
 
           {isLoadingDocuments ? (
@@ -522,6 +617,10 @@ export const DocumentsPage: React.FC = () => {
                             <Download className="h-4 w-4 mr-2" />
                             Download
                           </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleViewSummary(doc)}>
+                            <FileText className="h-4 w-4 mr-2" />
+                            View Summary
+                          </DropdownMenuItem>
                           <DropdownMenuItem 
                             className="text-red-600"
                             onClick={() => handleDeleteDocument(doc)}
@@ -543,9 +642,18 @@ export const DocumentsPage: React.FC = () => {
       {/* View Document Dialog */}
       <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
         <DialogContent className="max-w-4xl h-[80vh] flex flex-col">
-          <DialogHeader>
-            <DialogTitle>{selectedDocument?.title}</DialogTitle>
-          </DialogHeader>
+          <div className="flex items-center w-full">
+            <DialogTitle className="flex-1">{selectedDocument?.title}</DialogTitle>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 p-0"
+              onClick={() => setIsViewDialogOpen(false)}
+              title="Close"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
           <div className="flex-1 overflow-auto mt-4">
             {isPdfLoading ? (
               <div className="flex items-center justify-center h-full">
@@ -585,6 +693,94 @@ export const DocumentsPage: React.FC = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Summary Dialog */}
+      <Dialog open={isSummaryDialogOpen && !isSummaryMinimized} onOpenChange={setIsSummaryDialogOpen}>
+        <DialogContent className="max-w-2xl" >
+          <div className="flex items-center w-full">
+            <DialogTitle className="flex-1">Summary for {summaryDoc?.title}</DialogTitle>
+            <div className="flex flex-row gap-1 items-center">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 p-0"
+                onClick={() => setIsSummaryMinimized(true)}
+                title="Minimize"
+              >
+                <Minus className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 p-0"
+                onClick={() => setIsSummaryDialogOpen(false)}
+                title="Close"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+          <div className="mt-4 min-h-[120px] flex flex-col gap-4">
+            {isSummaryLoading ? (
+              <div className="flex flex-col items-center justify-center gap-4 py-8">
+                <Loader2 className="h-10 w-10 animate-spin text-blue-600 mb-2" />
+                <span className="text-lg font-semibold text-blue-700">Generating summary...</span>
+                <span className="text-gray-500 text-sm">This may take a few moments for large documents.</span>
+              </div>
+            ) : summary ? (
+              <div className="relative bg-gray-100 rounded p-4 max-h-96 overflow-auto">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="absolute top-2 right-2 z-10"
+                  onClick={handleCopySummary}
+                  title="Copy summary"
+                >
+                  <Copy className="h-4 w-4" />
+                </Button>
+                <pre className="whitespace-pre-wrap break-words text-gray-800 pr-8">{summary}</pre>
+              </div>
+            ) : (
+              <span className="text-gray-500">No summary available.</span>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Filter Dialog */}
+      <Dialog open={isFilterDialogOpen} onOpenChange={setIsFilterDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Filter Documents</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Name</label>
+              <Input value={filterName} onChange={e => setFilterName(e.target.value)} placeholder="Document name" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Type</label>
+              <Input value={filterType} onChange={e => setFilterType(e.target.value)} placeholder="e.g. PDF, DOCX" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Status</label>
+              <Input value={filterStatus} onChange={e => setFilterStatus(e.target.value)} placeholder="e.g. Processed" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Upload Date</label>
+              <Calendar selected={filterDate} onSelect={setFilterDate} />
+            </div>
+            <div className="flex items-center gap-2">
+              <input type="checkbox" checked={recentOnly} onChange={e => setRecentOnly(e.target.checked)} id="recentOnly" />
+              <label htmlFor="recentOnly" className="text-sm">Show only recently accessed</label>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => { setFilterType(''); setFilterStatus(''); setFilterName(''); setFilterDate(null); setRecentOnly(false); }}>Clear</Button>
+              <Button onClick={() => setIsFilterDialogOpen(false)}>Apply</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

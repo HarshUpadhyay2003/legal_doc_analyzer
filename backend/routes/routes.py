@@ -161,4 +161,20 @@ def delete_document_route(doc_id):
             os.remove(file_path_to_delete)
         return jsonify({"success": True, "message": "Document deleted successfully"}), 200
     except Exception as e:
-        return jsonify({"success": False, "error": f"Error deleting document: {str(e)}"}), 500 
+        return jsonify({"success": False, "error": f"Error deleting document: {str(e)}"}), 500
+
+@main.route('/documents/summary/<int:doc_id>', methods=['POST'])
+@jwt_required()
+@handle_errors
+def generate_document_summary(doc_id):
+    doc = get_document_by_id(doc_id)
+    if not doc:
+        return jsonify({"error": "Document not found"}), 404
+    text = doc.get('full_text', '')
+    if not text.strip():
+        return jsonify({"error": "No text available for summarization"}), 400
+    try:
+        summary = generate_summary(text)
+        return jsonify({"summary": summary}), 200
+    except Exception as e:
+        return jsonify({"error": f"Error generating summary: {str(e)}"}), 500 
