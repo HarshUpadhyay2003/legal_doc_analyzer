@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import logging
 from flask import Blueprint, request, jsonify, send_from_directory, current_app
 from werkzeug.utils import secure_filename
 from app.utils.extract_text import extract_text_from_pdf
@@ -8,6 +9,11 @@ from app.utils.clause_detector import detect_clauses
 from app.database import save_document, delete_document
 from app.database import get_all_documents, get_document_by_id
 from app.database import search_documents
+from app.utils.enhanced_legal_processor import EnhancedLegalProcessor
+from app.utils.legal_domain_features import LegalDomainFeatures
+from app.utils.context_understanding import ContextUnderstanding
+from app.utils.error_handler import handle_errors
+from flask_jwt_extended import jwt_required
 
 # Initialize the processors
 enhanced_legal_processor = EnhancedLegalProcessor()
@@ -22,6 +28,7 @@ UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
+main = Blueprint('main', __name__)
 
 @main.route('/upload', methods=['POST'])
 @jwt_required()
