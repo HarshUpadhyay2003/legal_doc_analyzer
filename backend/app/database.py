@@ -39,6 +39,21 @@ def init_db():
         )
         ''')
 
+        # Create question_answers table for persisting Q&A
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS question_answers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            document_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            question TEXT NOT NULL,
+            answer TEXT NOT NULL,
+            score REAL DEFAULT 0.0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (document_id) REFERENCES documents (id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        )
+        ''')
+
         conn.commit()
         logging.info("Database initialized successfully")
     except Exception as e:
@@ -97,15 +112,36 @@ def search_documents(query, search_type='all'):
     finally:
         conn.close()
 
-def save_document(title, full_text, summary, clauses, features, context_analysis, file_path):
-    """Save a document to the database"""
+def migrate_add_user_id_to_documents():
+    """Add user_id column to documents table if it doesn't exist."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        # Check if user_id column exists
+        cursor.execute("PRAGMA table_info(documents)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if 'user_id' not in columns:
+            cursor.execute('ALTER TABLE documents ADD COLUMN user_id INTEGER')
+            conn.commit()
+            logging.info("Added user_id column to documents table.")
+    except Exception as e:
+        logging.error(f"Migration error: {str(e)}")
+        raise
+    finally:
+        conn.close()
+
+# Call migration on import
+migrate_add_user_id_to_documents()
+
+def save_document(title, full_text, summary, clauses, features, context_analysis, file_path, user_id):
+    """Save a document to the database, associated with a user_id"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute('''
-        INSERT INTO documents (title, full_text, summary, clauses, features, context_analysis, file_path)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (title, full_text, summary, str(clauses), str(features), str(context_analysis), file_path))
+        INSERT INTO documents (title, full_text, summary, clauses, features, context_analysis, file_path, user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (title, full_text, summary, str(clauses), str(features), str(context_analysis), file_path, user_id))
         conn.commit()
         return cursor.lastrowid
     except Exception as e:
@@ -114,12 +150,15 @@ def save_document(title, full_text, summary, clauses, features, context_analysis
     finally:
         conn.close()
 
-def get_all_documents():
-    """Get all documents from the database, including file size if available"""
+def get_all_documents(user_id=None):
+    """Get all documents for a user from the database, including file size if available"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM documents ORDER BY upload_time DESC')
+        if user_id is not None:
+            cursor.execute('SELECT * FROM documents WHERE user_id = ? ORDER BY upload_time DESC', (user_id,))
+        else:
+            cursor.execute('SELECT * FROM documents ORDER BY upload_time DESC')
         documents = [dict(row) for row in cursor.fetchall()]
         for doc in documents:
             file_path = doc.get('file_path')
@@ -134,12 +173,15 @@ def get_all_documents():
     finally:
         conn.close()
 
-def get_document_by_id(doc_id):
-    """Get a specific document by ID"""
+def get_document_by_id(doc_id, user_id=None):
+    """Get a specific document by ID, optionally filtered by user_id"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM documents WHERE id = ?', (doc_id,))
+        if user_id is not None:
+            cursor.execute('SELECT * FROM documents WHERE id = ? AND user_id = ?', (doc_id, user_id))
+        else:
+            cursor.execute('SELECT * FROM documents WHERE id = ?', (doc_id,))
         document = cursor.fetchone()
         return dict(document) if document else None
     except Exception as e:

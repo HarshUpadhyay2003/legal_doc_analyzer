@@ -63,13 +63,25 @@ def upload_file():
         if file.filename == '':
             return jsonify({'error': 'No selected file'}), 400
 
-        if not allowed_file(file.filename):
-            return jsonify({'error': 'File type not allowed. Only PDF, DOC, DOCX are supported.'}), 400
+        # Only allow PDF files
+        if not (file.filename.lower().endswith('.pdf')):
+            return jsonify({'error': 'File type not allowed. Only PDF files are supported.'}), 400
 
         # Save file first
         filename = secure_filename(file.filename)
         file_path = os.path.join(UPLOAD_FOLDER, filename)
         file.save(file_path)
+
+        # Get user_id from JWT identity
+        identity = get_jwt_identity()
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute('SELECT id FROM users WHERE username = ?', (identity,))
+        user_row = cursor.fetchone()
+        conn.close()
+        if not user_row:
+            return jsonify({"success": False, "error": "User not found"}), 401
+        user_id = user_row[0]
 
         # Create initial document entry
         doc_id = save_document(
@@ -79,7 +91,8 @@ def upload_file():
             clauses="[]",
             features="{}",
             context_analysis="{}",
-            file_path=file_path
+            file_path=file_path,
+            user_id=user_id
         )
 
         # Return immediate response with document ID
@@ -369,4 +382,117 @@ def generate_document_summary(doc_id):
         return jsonify({"summary": summary}), 200
     except Exception as e:
         return jsonify({"error": f"Error generating summary: {str(e)}"}), 500
+
+@main.route('/ask-question', methods=['POST', 'OPTIONS'])
+def ask_question():
+    if request.method == 'OPTIONS':
+        # Allow CORS preflight without authentication
+        return '', 204
+    return _ask_question_impl()
+
+@jwt_required()
+def _ask_question_impl():
+    logging.debug('ask_question route called. Method: %s', request.method)
+    data = request.get_json()
+    document_id = data.get('document_id')
+    question = data.get('question', '').strip()
+    if not document_id or not question:
+        logging.debug('Missing document_id or question in /ask-question')
+        return jsonify({"success": False, "error": "document_id and question are required"}), 400
+    if not question:
+        logging.debug('Empty question in /ask-question')
+        return jsonify({"success": False, "error": "Question cannot be empty"}), 400
+    identity = get_jwt_identity()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT id FROM users WHERE username = ?', (identity,))
+    user_row = cursor.fetchone()
+    if not user_row:
+        conn.close()
+        logging.debug('User not found in /ask-question')
+        return jsonify({"success": False, "error": "User not found"}), 401
+    user_id = user_row[0]
+    # Fetch document and check ownership
+    cursor.execute('SELECT summary FROM documents WHERE id = ? AND user_id = ?', (document_id, user_id))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        logging.debug('Document not found or not owned by user in /ask-question')
+        return jsonify({"success": False, "error": "Document not found or not owned by user"}), 404
+    summary = row[0]
+    if not summary or not summary.strip():
+        logging.debug('Summary not available for this document in /ask-question')
+        return jsonify({"success": False, "error": "Summary not available for this document"}), 400
+    try:
+        result = answer_question(question, summary)
+        logging.debug('Answer generated successfully in /ask-question')
+        
+        # Save the question and answer to database
+        save_question_answer(document_id, user_id, question, result.get('answer', ''), result.get('score', 0.0))
+        
+        return jsonify({"success": True, "answer": result.get('answer', ''), "score": result.get('score', 0.0)}), 200
+    except Exception as e:
+        logging.error(f"Error answering question: {str(e)}")
+        return jsonify({"success": False, "error": f"Error answering question: {str(e)}"}), 500
+
+@main.route('/previous-questions/<int:doc_id>', methods=['GET'])
+@jwt_required()
+def get_previous_questions(doc_id):
+    try:
+        identity = get_jwt_identity()
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute('SELECT id FROM users WHERE username = ?', (identity,))
+        user_row = cursor.fetchone()
+        if not user_row:
+            conn.close()
+            return jsonify({"success": False, "error": "User not found"}), 401
+        user_id = user_row[0]
+        
+        # Check if document belongs to user
+        cursor.execute('SELECT id FROM documents WHERE id = ? AND user_id = ?', (doc_id, user_id))
+        if not cursor.fetchone():
+            conn.close()
+            return jsonify({"success": False, "error": "Document not found or not owned by user"}), 404
+        
+        # Fetch previous questions for this document
+        cursor.execute('''
+            SELECT id, question, answer, score, created_at 
+            FROM question_answers 
+            WHERE document_id = ? AND user_id = ? 
+            ORDER BY created_at DESC
+        ''', (doc_id, user_id))
+        
+        questions = []
+        for row in cursor.fetchall():
+            questions.append({
+                'id': row[0],
+                'question': row[1],
+                'answer': row[2],
+                'score': row[3],
+                'timestamp': row[4]
+            })
+        
+        conn.close()
+        return jsonify({"success": True, "questions": questions}), 200
+        
+    except Exception as e:
+        logging.error(f"Error fetching previous questions: {str(e)}")
+        return jsonify({"success": False, "error": f"Error fetching previous questions: {str(e)}"}), 500
+
+def save_question_answer(document_id, user_id, question, answer, score):
+    """Save question and answer to database"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO question_answers (document_id, user_id, question, answer, score, created_at)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ''', (document_id, user_id, question, answer, score))
+        conn.commit()
+        conn.close()
+        logging.info(f"Question and answer saved for document {document_id}")
+    except Exception as e:
+        logging.error(f"Error saving question and answer: {str(e)}")
+        raise
 

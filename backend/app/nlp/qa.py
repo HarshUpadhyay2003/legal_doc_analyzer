@@ -3,12 +3,31 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 import numpy as np
 import logging
 from app.utils.cache import cache_qa_result
+import torch
+from app.utils.enhanced_models import enhanced_model_manager
+
+# Check GPU availability
+if torch.cuda.is_available():
+    gpu_name = torch.cuda.get_device_name(0)
+    gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+    logging.info(f"GPU detected: {gpu_name} ({gpu_memory:.1f}GB) - Using GPU for QA model")
+else:
+    logging.warning("No GPU detected - Using CPU for QA model (this will be slower)")
 
 # Initialize model and tokenizer
 def get_qa_model():
     try:
+        logging.info("Loading QA model and tokenizer...")
         model = AutoModelForSeq2SeqLM.from_pretrained("TheGod-2003/legal_QA_model")
         tokenizer = AutoTokenizer.from_pretrained("TheGod-2003/legal_QA_model", use_fast=False)
+        
+        # Move model to GPU if available
+        if torch.cuda.is_available():
+            model = model.to("cuda")
+            logging.info("QA model moved to GPU successfully")
+        else:
+            logging.info("QA model loaded on CPU")
+            
         return model, tokenizer
     except Exception as e:
         logging.error(f"Error initializing QA model: {str(e)}")
@@ -17,6 +36,8 @@ def get_qa_model():
 # Load legal QA model
 try:
     qa_model, qa_tokenizer = get_qa_model()
+    device_str = "GPU" if torch.cuda.is_available() else "CPU"
+    logging.info(f"QA model loaded successfully on {device_str}")
 except Exception as e:
     logging.error(f"Failed to load QA model: {str(e)}")
     qa_model = None
@@ -52,50 +73,10 @@ def get_top_n_chunks(question, context, n=3):
 
 @cache_qa_result
 def answer_question(question, context):
-    try:
-        if qa_model is None or qa_tokenizer is None:
-            raise Exception("QA model not initialized")
-
-        # Handle empty or very short context
-        if not context or len(context.strip()) < 10:
-            return {
-                "answer": "The provided context is too short to generate a meaningful answer.",
-                "score": 0.0,
-                "start": 0,
-                "end": 0
-            }
-        
-        # Get relevant chunks based on context length
-        context_length = len(context.split())
-        n_chunks = min(3, max(1, context_length // 100))  # Adjust chunks based on context length
-        top_chunks = get_top_n_chunks(question, context, n=n_chunks)
-        
-        # Format input for T5 model
-        input_text = f"question: {question} context: {top_chunks}"
-        
-        # Generate answer
-        inputs = qa_tokenizer(input_text, return_tensors="pt", max_length=512, truncation=True)
-        outputs = qa_model.generate(
-            **inputs,
-            max_length=128,
-            num_beams=4,
-            length_penalty=2.0,
-            early_stopping=True
-        )
-        
-        answer = qa_tokenizer.decode(outputs[0], skip_special_tokens=True)
-        
-        # Since T5 doesn't provide confidence scores, we'll use a default high score
-        # for answers that are not empty
-        score = 0.9 if answer.strip() else 0.0
-        
-        return {
-            "answer": answer,
-            "score": score,
-            "start": 0,  # T5 doesn't provide these
-            "end": 0     # T5 doesn't provide these
-        }
-        
-    except Exception as e:
-        logging.error(f"Error in answer_question: {str(e)}")
-        raise  # Re-raise the exception to be handled by the route
+    result = enhanced_model_manager.answer_question_enhanced(question, context)
+    return {
+        'answer': result['answer'],
+        'score': result.get('confidence', 0.0),
+        'start': 0,
+        'end': 0
+    }
