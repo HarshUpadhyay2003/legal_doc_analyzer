@@ -133,7 +133,7 @@ export const RegisterForm: React.FC<RegisterFormProps> = ({ onSwitchToLogin, onR
         </div>
         <CardTitle className="text-2xl font-bold text-gray-900">Create Account</CardTitle>
         <CardDescription className="text-gray-600">
-          Join JuriSense to analyze legal documents
+          Join LawInsight to analyze legal documents
         </CardDescription>
       </CardHeader>
       <CardContent>

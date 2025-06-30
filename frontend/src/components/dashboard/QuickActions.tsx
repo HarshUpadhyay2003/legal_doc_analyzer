@@ -1,27 +1,27 @@
-
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Upload, MessageSquare, Search, Plus } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 const actions = [
   {
     title: 'Upload Document',
-    description: 'Upload and analyze new legal documents',
+    description: 'Upload & review new legal documents.',
     icon: Upload,
     color: 'blue',
     action: 'upload'
   },
   {
     title: 'Ask Question',
-    description: 'Get answers from your documents',
+    description: 'Get answers from your documents.',
     icon: MessageSquare,
     color: 'purple',
     action: 'question'
   },
   {
     title: 'Search Documents',
-    description: 'Find specific information quickly',
+    description: 'Find specific information quickly.',
     icon: Search,
     color: 'green',
     action: 'search'
@@ -33,22 +33,24 @@ interface QuickActionsProps {
 }
 
 export const QuickActions: React.FC<QuickActionsProps> = ({ onNavigate }) => {
+  const navigate = useNavigate();
   const handleAction = (action: string) => {
-    console.log(`Performing action: ${action}`);
-    
     switch (action) {
       case 'upload':
-        onNavigate?.('documents');
+        if (onNavigate) onNavigate('documents');
+        else navigate('/documents');
         break;
       case 'question':
-        onNavigate?.('question-answering');
+        if (onNavigate) onNavigate('question-answering');
+        else navigate('/question-answering');
         break;
       case 'search':
-        onNavigate?.('search');
+        if (onNavigate) onNavigate('search');
+        else navigate('/search');
         break;
       case 'new-project':
-        console.log('Starting new project...');
-        // Implement new project creation
+        // Implement new project creation logic here
+        alert('New project creation coming soon!');
         break;
     }
   };

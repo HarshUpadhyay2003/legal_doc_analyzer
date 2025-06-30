@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Upload, Search, FileText, MoreHorizontal, Eye, Download, Trash2, Loader2, Copy, Minus, X } from 'lucide-react';
+import { Upload, Search, FileText, MoreHorizontal, Eye, Download, Trash2, Loader2, Copy, Minus, X, Filter } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -38,6 +38,8 @@ import {
 import { toast } from '@/hooks/use-toast';
 import { Calendar } from '@/components/ui/calendar';
 import { format } from 'date-fns';
+import { SummaryDialog } from './SummaryDialog';
+import { useSummary } from '@/contexts/SummaryContext';
 
 const BASE_API_URL = 'http://localhost:5000'; // Adjust if your backend is on a different URL/port
 
@@ -74,10 +76,7 @@ export const DocumentsPage: React.FC = () => {
   const [isPdfLoading, setIsPdfLoading] = useState(false);
   const [isSummaryDialogOpen, setIsSummaryDialogOpen] = useState(false);
   const [isSummaryMinimized, setIsSummaryMinimized] = useState(false);
-  const [summary, setSummary] = useState<string | null>(null);
-  const [isSummaryLoading, setIsSummaryLoading] = useState(false);
   const [summaryDoc, setSummaryDoc] = useState<Document | null>(null);
-  const [summaryCache, setSummaryCache] = useState<{ [docId: number]: string }>({});
   const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false);
   const [filterType, setFilterType] = useState<string>('');
   const [filterStatus, setFilterStatus] = useState<string>('');
@@ -85,6 +84,7 @@ export const DocumentsPage: React.FC = () => {
   const [filterDate, setFilterDate] = useState<Date | null>(null);
   const [recentOnly, setRecentOnly] = useState(false);
   const [recentDocs, setRecentDocs] = useState<number[]>([]); // store recently accessed doc IDs
+  const { getSummary } = useSummary();
 
   const getAuthHeader = () => {
     const token = localStorage.getItem('jwt_token');
@@ -243,13 +243,18 @@ export const DocumentsPage: React.FC = () => {
     fileInputRef.current?.click();
   };
 
-  const getStatusBadge = (status: string) => {
-    const variants = {
-      'Processed': 'bg-green-100 text-green-800',
-      'Processing': 'bg-yellow-100 text-yellow-800',
-      'Failed': 'bg-red-100 text-red-800'
-    };
-    return variants[status as keyof typeof variants] || 'bg-gray-100 text-gray-800';
+  const getStatusBadge = (doc: Document) => {
+    const summary = getSummary(doc.id);
+    if (!summary || (!summary.content && !summary.isLoading)) {
+      return { label: 'Unprocessed', className: 'bg-gray-100 text-gray-800' };
+    }
+    if (summary.isLoading) {
+      return { label: 'Processing', className: 'bg-yellow-100 text-yellow-800' };
+    }
+    if (summary.content) {
+      return { label: 'Processed', className: 'bg-green-100 text-green-800' };
+    }
+    return { label: 'Unprocessed', className: 'bg-gray-100 text-gray-800' };
   };
 
   const handleViewDocument = useCallback(async (doc: Document) => {
@@ -403,65 +408,15 @@ export const DocumentsPage: React.FC = () => {
     }
   };
 
-  const handleViewSummary = async (doc: Document) => {
+  const handleViewSummary = (doc: Document) => {
     setSummaryDoc(doc);
     setIsSummaryDialogOpen(true);
     setIsSummaryMinimized(false);
-    setIsSummaryLoading(true);
-    setSummary(null);
-    if (summaryCache[doc.id]) {
-      setSummary(summaryCache[doc.id]);
-      setIsSummaryLoading(false);
-      return;
-    }
-    try {
-      const response = await fetch(`${BASE_API_URL}/documents/summary/${doc.id}`, {
-        method: 'POST',
-        headers: {
-          ...getAuthHeader(),
-          'Content-Type': 'application/json',
-        },
-      });
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-      }
-      const data = await response.json();
-      setSummary(data.summary);
-      setSummaryCache((prev) => ({ ...prev, [doc.id]: data.summary }));
-      // Notify user if minimized
-      if (isSummaryMinimized) {
-        toast({
-          title: 'Summary Ready',
-          description: `Summary for ${doc.title} is ready. Click to view.`,
-          action: (
-            <Button
-              variant="outline"
-              onClick={() => {
-                setIsSummaryDialogOpen(true);
-                setIsSummaryMinimized(false);
-              }}
-            >
-              View
-            </Button>
-          ),
-        });
-      }
-    } catch (error) {
-      toast({
-        title: 'Summary Error',
-        description: error instanceof Error ? error.message : String(error),
-        variant: 'destructive',
-      });
-      setSummary(null);
-    } finally {
-      setIsSummaryLoading(false);
-    }
   };
 
   const handleCopySummary = () => {
-    if (summary) {
-      navigator.clipboard.writeText(summary);
+    if (summaryDoc) {
+      navigator.clipboard.writeText(summaryDoc.title);
       toast({
         title: 'Copied',
         description: 'Summary copied to clipboard.',
@@ -596,9 +551,7 @@ export const DocumentsPage: React.FC = () => {
                     </TableCell>
                     <TableCell>{doc.upload_time}</TableCell>
                     <TableCell>
-                      <Badge className={getStatusBadge(doc.status)}>
-                        {doc.status}
-                      </Badge>
+                      <Badge className={getStatusBadge(doc).className}>{getStatusBadge(doc).label}</Badge>
                     </TableCell>
                     <TableCell>{doc.size}</TableCell>
                     <TableCell>
@@ -694,58 +647,14 @@ export const DocumentsPage: React.FC = () => {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Summary Dialog */}
-      <Dialog open={isSummaryDialogOpen && !isSummaryMinimized} onOpenChange={setIsSummaryDialogOpen}>
-        <DialogContent className="max-w-2xl" >
-          <div className="flex items-center w-full">
-            <DialogTitle className="flex-1">Summary for {summaryDoc?.title}</DialogTitle>
-            <div className="flex flex-row gap-1 items-center">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 p-0"
-                onClick={() => setIsSummaryMinimized(true)}
-                title="Minimize"
-              >
-                <Minus className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 p-0"
-                onClick={() => setIsSummaryDialogOpen(false)}
-                title="Close"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-          <div className="mt-4 min-h-[120px] flex flex-col gap-4">
-            {isSummaryLoading ? (
-              <div className="flex flex-col items-center justify-center gap-4 py-8">
-                <Loader2 className="h-10 w-10 animate-spin text-blue-600 mb-2" />
-                <span className="text-lg font-semibold text-blue-700">Generating summary...</span>
-                <span className="text-gray-500 text-sm">This may take a few moments for large documents.</span>
-              </div>
-            ) : summary ? (
-              <div className="relative bg-gray-100 rounded p-4 max-h-96 overflow-auto">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="absolute top-2 right-2 z-10"
-                  onClick={handleCopySummary}
-                  title="Copy summary"
-                >
-                  <Copy className="h-4 w-4" />
-                </Button>
-                <pre className="whitespace-pre-wrap break-words text-gray-800 pr-8">{summary}</pre>
-              </div>
-            ) : (
-              <span className="text-gray-500">No summary available.</span>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* Persistent Summary Dialog */}
+      <SummaryDialog
+        isOpen={isSummaryDialogOpen}
+        onOpenChange={setIsSummaryDialogOpen}
+        isMinimized={isSummaryMinimized}
+        onMinimizeChange={setIsSummaryMinimized}
+        selectedDocument={summaryDoc}
+      />
 
       {/* Filter Dialog */}
       <Dialog open={isFilterDialogOpen} onOpenChange={setIsFilterDialogOpen}>

@@ -22,6 +22,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
 interface HeaderProps {
   onToggleSidebar: () => void;
@@ -35,6 +36,8 @@ export const Header: React.FC<HeaderProps> = ({ onToggleSidebar, sidebarCollapse
   const { theme, setTheme, isDark } = useTheme();
   const username = localStorage.getItem('username') || 'User';
   const email = localStorage.getItem('email') || '';
+  const [isNotificationsOpen, setNotificationsOpen] = useState(false);
+  const [isHelpOpen, setHelpOpen] = useState(false);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,7 +73,7 @@ export const Header: React.FC<HeaderProps> = ({ onToggleSidebar, sidebarCollapse
 
   return (
     <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between">
-      {/* Left side - Mobile menu and search */}
+      {/* Left side - Mobile menu */}
       <div className="flex items-center space-x-4 flex-1">
         <Button
           variant="ghost"
@@ -80,17 +83,6 @@ export const Header: React.FC<HeaderProps> = ({ onToggleSidebar, sidebarCollapse
         >
           <Menu className="h-5 w-5" />
         </Button>
-        
-        <form onSubmit={handleSearch} className="relative max-w-md flex-1">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-          <Input
-            type="text"
-            placeholder="Search documents, questions..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10 bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600 focus:bg-white dark:focus:bg-gray-600 dark:text-white dark:placeholder-gray-400"
-          />
-        </form>
       </div>
 
       {/* Right side - Actions and profile */}
@@ -105,33 +97,29 @@ export const Header: React.FC<HeaderProps> = ({ onToggleSidebar, sidebarCollapse
           {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
         </Button>
 
-        {/* Help Button */}
-        <Button 
-          variant="ghost" 
-          size="icon" 
-          onClick={handleHelpClick}
-          className="text-foreground hover:text-accent"
-        >
-          <HelpCircle className="h-5 w-5" />
-        </Button>
-
-        {/* Notifications */}
-        <Button 
-          variant="ghost" 
-          size="icon" 
-          onClick={handleNotificationClick}
-          className="text-foreground hover:text-accent relative"
-        >
-          <Bell className="h-5 w-5" />
-          {notificationCount > 0 && (
-            <Badge 
-              variant="destructive" 
-              className="absolute -top-1 -right-1 h-5 w-5 rounded-full p-0 flex items-center justify-center text-xs"
+        {/* Help Button (Dialog) */}
+        <Dialog open={isHelpOpen} onOpenChange={setHelpOpen}>
+          <DialogTrigger asChild>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="text-foreground hover:text-accent"
+              onClick={() => setHelpOpen(true)}
             >
-              {notificationCount}
-            </Badge>
-          )}
-        </Button>
+              <HelpCircle className="h-5 w-5" />
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Help & Support</DialogTitle>
+              <DialogDescription>
+                For any help or support, please contact the developer:<br/>
+                <span className="font-semibold">Harsh Upadhyay</span><br/>
+                <a href="mailto:mohit1upadhyay@gmail.com" className="text-blue-600 underline">mohit1upadhyay@gmail.com</a>
+              </DialogDescription>
+            </DialogHeader>
+          </DialogContent>
+        </Dialog>
 
         {/* User Profile Dropdown */}
         <DropdownMenu>
@@ -158,10 +146,6 @@ export const Header: React.FC<HeaderProps> = ({ onToggleSidebar, sidebarCollapse
             <DropdownMenuItem onClick={handleSettingsClick} className="dark:text-white dark:hover:bg-gray-700">
               <Settings className="mr-2 h-4 w-4" />
               Settings
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleHelpClick} className="dark:text-white dark:hover:bg-gray-700">
-              <HelpCircle className="mr-2 h-4 w-4" />
-              Help & Support
             </DropdownMenuItem>
             <DropdownMenuSeparator className="dark:bg-gray-700" />
             <DropdownMenuItem onClick={handleSignOut} className="text-red-600 dark:text-red-400 dark:hover:bg-gray-700">

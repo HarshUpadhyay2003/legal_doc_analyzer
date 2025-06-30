@@ -18,6 +18,7 @@ from app.utils.legal_domain_features import LegalDomainFeatures
 from app.utils.context_understanding import ContextUnderstanding
 import logging
 import textract
+from app.database import get_user_profile, update_user_profile, change_user_password
 
 main = Blueprint("main", __name__)
 
@@ -495,4 +496,120 @@ def save_question_answer(document_id, user_id, question, answer, score):
     except Exception as e:
         logging.error(f"Error saving question and answer: {str(e)}")
         raise
+
+@main.route('/search', methods=['GET'])
+@jwt_required()
+def search_all():
+    try:
+        query = request.args.get('q', '').strip()
+        if not query:
+            return jsonify({'error': 'Query parameter "q" is required.'}), 400
+        identity = get_jwt_identity()
+        # Get user_id
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute('SELECT id FROM users WHERE username = ?', (identity,))
+        user_row = cursor.fetchone()
+        conn.close()
+        if not user_row:
+            return jsonify({'error': 'User not found'}), 401
+        user_id = user_row[0]
+        # Search documents (title, summary)
+        from app.database import search_documents, search_questions_answers
+        doc_results = search_documents(query)
+        # Search Q&A
+        qa_results = search_questions_answers(query, user_id=user_id)
+        return jsonify({
+            'documents': doc_results,
+            'qa': qa_results
+        }), 200
+    except Exception as e:
+        return jsonify({'error': f'Error during search: {str(e)}'}), 500
+
+@main.route('/user/profile', methods=['GET'])
+@jwt_required()
+def get_profile():
+    identity = get_jwt_identity()
+    profile = get_user_profile(identity)
+    if profile:
+        return jsonify(profile), 200
+    else:
+        return jsonify({'error': 'User not found'}), 404
+
+@main.route('/user/profile', methods=['POST'])
+@jwt_required()
+def update_profile():
+    identity = get_jwt_identity()
+    data = request.get_json()
+    email = data.get('email')
+    phone = data.get('phone')
+    company = data.get('company')
+    if not email:
+        return jsonify({'error': 'Email is required'}), 400
+    updated = update_user_profile(identity, email, phone, company)
+    if updated:
+        return jsonify({'message': 'Profile updated successfully'}), 200
+    else:
+        return jsonify({'error': 'Failed to update profile'}), 400
+
+@main.route('/user/change-password', methods=['POST'])
+@jwt_required()
+def change_password():
+    identity = get_jwt_identity()
+    data = request.get_json()
+    current_password = data.get('current_password')
+    new_password = data.get('new_password')
+    confirm_password = data.get('confirm_password')
+    if not current_password or not new_password or not confirm_password:
+        return jsonify({'error': 'All password fields are required'}), 400
+    if new_password != confirm_password:
+        return jsonify({'error': 'New passwords do not match'}), 400
+    success, msg = change_user_password(identity, current_password, new_password)
+    if success:
+        return jsonify({'message': msg}), 200
+    else:
+        return jsonify({'error': msg}), 400
+
+@main.route('/dashboard-stats', methods=['GET'])
+@jwt_required()
+def dashboard_stats():
+    try:
+        identity = get_jwt_identity()
+        # Get user_id
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute('SELECT id FROM users WHERE username = ?', (identity,))
+        user_row = cursor.fetchone()
+        if not user_row:
+            conn.close()
+            return jsonify({'error': 'User not found'}), 401
+        user_id = user_row[0]
+        conn.close()
+
+        # Get all documents for this user
+        from app.database import get_all_documents
+        documents = get_all_documents(user_id=user_id)
+        total_documents = len(documents)
+        processed_documents = sum(1 for doc in documents if doc.get('summary') and doc.get('summary') != 'Processing...')
+        pending_analysis = total_documents - processed_documents
+
+        # Count recent questions (last 30 days)
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT COUNT(*) FROM question_answers 
+            WHERE user_id = ? AND created_at >= datetime('now', '-30 days')
+        ''', (user_id,))
+        recent_questions = cursor.fetchone()[0]
+        conn.close()
+
+        return jsonify({
+            'total_documents': total_documents,
+            'processed_documents': processed_documents,
+            'pending_analysis': pending_analysis,
+            'recent_questions': recent_questions
+        }), 200
+    except Exception as e:
+        logging.error(f"Error fetching dashboard stats: {str(e)}")
+        return jsonify({'error': f'Error fetching dashboard stats: {str(e)}'}), 500
 

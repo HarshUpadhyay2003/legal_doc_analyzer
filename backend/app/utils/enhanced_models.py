@@ -89,7 +89,7 @@ class EnhancedModelManager:
             logging.error(f"Error initializing models: {e}")
             raise
     
-    def generate_enhanced_summary(self, text: str, max_length: int = 2048, min_length: int = 200) -> Dict[str, Any]:
+    def generate_enhanced_summary(self, text: str, max_length: int = 4096, min_length: int = 200) -> Dict[str, Any]:
         """
         Generate enhanced summary using ensemble approach with multiple models
         """
@@ -97,27 +97,71 @@ class EnhancedModelManager:
             summaries = []
             weights = []
             cleaned_text = self._preprocess_text(text)
+            
+            # Handle long documents with improved chunking
+            cleaned_text = self._handle_long_documents(cleaned_text)
+            
             # Only legal summarizer
             if 'legal_summarizer' in self.models:
                 try:
+                    # Improved parameters for LED-16384 model
                     summary = self.models['legal_summarizer'](
                         cleaned_text,
                         max_length=max_length,
                         min_length=min_length,
-                        num_beams=4,
-                        length_penalty=1.0,
-                        repetition_penalty=2.0,
-                        no_repeat_ngram_size=3,
-                        early_stopping=True
+                        num_beams=5,  # Increased for better quality
+                        length_penalty=1.2,  # Slightly favor longer summaries
+                        repetition_penalty=1.5,  # Reduced to avoid over-penalization
+                        no_repeat_ngram_size=2,  # Reduced for legal text
+                        early_stopping=False,  # Disabled to prevent premature stopping
+                        do_sample=True,  # Enable sampling for better diversity
+                        temperature=0.7,  # Add some randomness
+                        top_p=0.9,  # Nucleus sampling
+                        pad_token_id=self.models['legal_summarizer'].tokenizer.eos_token_id,
+                        eos_token_id=self.models['legal_summarizer'].tokenizer.eos_token_id
                     )[0]['summary_text']
+                    
+                    # Ensure summary is complete
+                    summary = self._ensure_complete_summary(summary, cleaned_text)
+                    
+                    # Retry if summary is too short or incomplete
+                    if len(summary.split()) < min_length or not summary.strip().endswith(('.', '!', '?')):
+                        logging.info("Summary too short or incomplete, retrying with different parameters...")
+                        retry_summary = self.models['legal_summarizer'](
+                            cleaned_text,
+                            max_length=max_length * 2,  # Double the max length
+                            min_length=min_length,
+                            num_beams=3,  # Reduce beams for faster generation
+                            length_penalty=1.5,  # Favor longer summaries
+                            repetition_penalty=1.2,
+                            no_repeat_ngram_size=1,
+                            early_stopping=False,
+                            do_sample=False,  # Disable sampling for more deterministic output
+                            pad_token_id=self.models['legal_summarizer'].tokenizer.eos_token_id,
+                            eos_token_id=self.models['legal_summarizer'].tokenizer.eos_token_id
+                        )[0]['summary_text']
+                        
+                        retry_summary = self._ensure_complete_summary(retry_summary, cleaned_text)
+                        if len(retry_summary.split()) > len(summary.split()):
+                            summary = retry_summary
+                    
                     summaries.append(summary)
                     weights.append(1.0)
+                    
                 except Exception as e:
                     logging.warning(f"Legal summarizer failed: {e}")
+                    # Fallback to extractive summarization
+                    fallback_summary = self._extractive_summarization(cleaned_text, max_length)
+                    if fallback_summary:
+                        summaries.append(fallback_summary)
+                        weights.append(1.0)
+            
             if not summaries:
                 raise Exception("No models could generate summaries")
+            
             final_summary = self._ensemble_summaries(summaries, weights)
-            final_summary = self._postprocess_summary(final_summary, summaries, min_sentences=10)
+            final_summary = self._postprocess_summary(final_summary, summaries, min_sentences=8)
+            
             return {
                 'summary': final_summary,
                 'model_summaries': summaries,
@@ -377,14 +421,25 @@ class EnhancedModelManager:
     def _preprocess_text(self, text: str) -> str:
         """Preprocess text for better model performance"""
         try:
-            # Remove common artifacts
+            # Remove common artifacts but preserve legal structure
             text = re.sub(r'[\\\n\r\u200b\u2022\u00a0_=]+', ' ', text)
             text = re.sub(r'<.*?>', ' ', text)
-            text = re.sub(r'[^\x00-\x7F]+', ' ', text)
+            
+            # Preserve legal citations and numbers (don't remove them completely)
+            # Instead of removing section numbers, normalize them
+            text = re.sub(r'\b(SEC\.|Section|Article)\s*(\d+)\.?', r'Section \2', text, flags=re.IGNORECASE)
+            
+            # Clean up excessive whitespace
             text = re.sub(r'\s{2,}', ' ', text)
             
-            # Normalize legal citations
-            text = re.sub(r'\b(SEC\.|Section|Article)\s*\d+\.?', '', text, flags=re.IGNORECASE)
+            # Preserve important legal punctuation and formatting
+            text = re.sub(r'([.!?])\s*([A-Z])', r'\1 \2', text)  # Ensure proper sentence spacing
+            
+            # Remove non-printable characters but keep legal symbols
+            text = re.sub(r'[^\x00-\x7F]+', ' ', text)
+            
+            # Ensure proper spacing around legal terms
+            text = re.sub(r'\b(Lessee|Lessor|Party|Parties)\b', r' \1 ', text, flags=re.IGNORECASE)
             
             return text.strip()
             
@@ -392,7 +447,187 @@ class EnhancedModelManager:
             logging.warning(f"Text preprocessing failed: {e}")
             return text
     
-    def _postprocess_summary(self, summary: str, all_summaries: list = None, min_sentences: int = 10) -> str:
+    def _chunk_text_for_summarization(self, text: str, max_words: int = 8000) -> str:
+        """Chunk long text for summarization while preserving legal document structure"""
+        try:
+            words = text.split()
+            if len(words) <= max_words:
+                return text
+            
+            # Split into sentences first
+            sentences = self._split_into_sentences(text)
+            
+            # Take the most important sentences (first and last portions)
+            total_sentences = len(sentences)
+            if total_sentences <= 50:
+                return text
+            
+            # Take first 60% and last 20% of sentences
+            first_portion = int(total_sentences * 0.6)
+            last_portion = int(total_sentences * 0.2)
+            
+            selected_sentences = sentences[:first_portion] + sentences[-last_portion:]
+            chunked_text = " ".join(selected_sentences)
+            
+            # Ensure we don't exceed token limit
+            if len(chunked_text.split()) > max_words:
+                chunked_text = " ".join(chunked_text.split()[:max_words])
+            
+            return chunked_text
+            
+        except Exception as e:
+            logging.warning(f"Text chunking failed: {e}")
+            return text
+    
+    def _handle_long_documents(self, text: str) -> str:
+        """Handle very long documents by using a sliding window approach"""
+        try:
+            # LED-16384 has a context window of ~16k tokens
+            # Conservative estimate: ~12k tokens for input to leave room for generation
+            max_tokens = 12000
+            
+            # Approximate tokens (roughly 1.3 words per token for English)
+            words = text.split()
+            if len(words) <= max_tokens * 0.8:  # Conservative limit
+                return text
+            
+            # Use sliding window approach for very long documents
+            sentences = self._split_into_sentences(text)
+            
+            if len(sentences) < 10:
+                return text
+            
+            # Take key sections: beginning, middle, and end
+            total_sentences = len(sentences)
+            
+            # Take first 40%, middle 20%, and last 40%
+            first_end = int(total_sentences * 0.4)
+            middle_start = int(total_sentences * 0.4)
+            middle_end = int(total_sentences * 0.6)
+            last_start = int(total_sentences * 0.6)
+            
+            key_sentences = (
+                sentences[:first_end] + 
+                sentences[middle_start:middle_end] + 
+                sentences[last_start:]
+            )
+            
+            # Ensure we don't exceed token limit
+            combined_text = " ".join(key_sentences)
+            words = combined_text.split()
+            
+            if len(words) > max_tokens * 0.8:
+                # Truncate to safe limit
+                combined_text = " ".join(words[:int(max_tokens * 0.8)])
+            
+            return combined_text
+            
+        except Exception as e:
+            logging.warning(f"Long document handling failed: {e}")
+            return text
+    
+    def _ensure_complete_summary(self, summary: str, original_text: str) -> str:
+        """Ensure the summary is complete and not truncated mid-sentence"""
+        try:
+            if not summary:
+                return summary
+            
+            # Check if summary ends with complete sentence
+            if not summary.rstrip().endswith(('.', '!', '?')):
+                # Find the last complete sentence
+                sentences = summary.split('. ')
+                if len(sentences) > 1:
+                    # Remove the incomplete last sentence
+                    summary = '. '.join(sentences[:-1]) + '.'
+            
+            # Ensure minimum length
+            if len(summary.split()) < 50:
+                # Try to extract more content from original text
+                additional_content = self._extract_key_sentences(original_text, 100)
+                if additional_content:
+                    summary = summary + " " + additional_content
+            
+            return summary.strip()
+            
+        except Exception as e:
+            logging.warning(f"Summary completion check failed: {e}")
+            return summary
+    
+    def _extract_key_sentences(self, text: str, max_words: int = 100) -> str:
+        """Extract key sentences from text for summary completion"""
+        try:
+            sentences = self._split_into_sentences(text)
+            
+            # Simple heuristic: take sentences with legal keywords
+            legal_keywords = ['lease', 'rent', 'payment', 'term', 'agreement', 'lessor', 'lessee', 
+                            'covenant', 'obligation', 'right', 'duty', 'termination', 'renewal']
+            
+            key_sentences = []
+            word_count = 0
+            
+            for sentence in sentences:
+                sentence_lower = sentence.lower()
+                if any(keyword in sentence_lower for keyword in legal_keywords):
+                    sentence_words = len(sentence.split())
+                    if word_count + sentence_words <= max_words:
+                        key_sentences.append(sentence)
+                        word_count += sentence_words
+                    else:
+                        break
+            
+            return " ".join(key_sentences)
+            
+        except Exception as e:
+            logging.warning(f"Key sentence extraction failed: {e}")
+            return ""
+    
+    def _extractive_summarization(self, text: str, max_length: int) -> str:
+        """Fallback extractive summarization using TF-IDF"""
+        try:
+            from sklearn.feature_extraction.text import TfidfVectorizer
+            from sklearn.metrics.pairwise import cosine_similarity
+            
+            sentences = self._split_into_sentences(text)
+            
+            if len(sentences) < 3:
+                return text
+            
+            # Create TF-IDF vectors
+            vectorizer = TfidfVectorizer(stop_words='english', max_features=1000)
+            tfidf_matrix = vectorizer.fit_transform(sentences)
+            
+            # Calculate sentence importance based on TF-IDF scores
+            sentence_scores = []
+            for i in range(len(sentences)):
+                score = tfidf_matrix[i].sum()
+                sentence_scores.append((score, i))
+            
+            # Sort by score and take top sentences
+            sentence_scores.sort(reverse=True)
+            
+            # Select sentences up to max_length
+            selected_indices = []
+            total_words = 0
+            
+            for score, idx in sentence_scores:
+                sentence_words = len(sentences[idx].split())
+                if total_words + sentence_words <= max_length // 2:  # Conservative estimate
+                    selected_indices.append(idx)
+                    total_words += sentence_words
+                else:
+                    break
+            
+            # Sort by original order
+            selected_indices.sort()
+            summary_sentences = [sentences[i] for i in selected_indices]
+            
+            return " ".join(summary_sentences)
+            
+        except Exception as e:
+            logging.warning(f"Extractive summarization failed: {e}")
+            return text[:max_length] if len(text) > max_length else text
+    
+    def _postprocess_summary(self, summary: str, all_summaries: Optional[List[str]] = None, min_sentences: int = 10) -> str:
         """Post-process summary for better readability"""
         try:
             summary = re.sub(r'[\\\n\r\u200b\u2022\u00a0_=]+', ' ', summary)
@@ -421,11 +656,32 @@ class EnhancedModelManager:
             return summary
     
     def _split_into_sentences(self, text: str) -> List[str]:
-        """Split text into sentences"""
+        """Split text into sentences with improved handling for legal documents"""
         try:
-            # Simple sentence splitting
-            sentences = re.split(r'[.!?]+', text)
-            return [s.strip() for s in sentences if s.strip()]
+            # More sophisticated sentence splitting for legal documents
+            # Handle legal abbreviations and citations properly
+            text = re.sub(r'([.!?])\s*([A-Z])', r'\1 \2', text)
+            
+            # Split on sentence endings, but be careful with legal citations
+            sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', text)
+            
+            # Clean up sentences
+            cleaned_sentences = []
+            for sentence in sentences:
+                sentence = sentence.strip()
+                if sentence and len(sentence) > 10:  # Filter out very short fragments
+                    # Handle legal abbreviations that might have been split
+                    if sentence.startswith(('Sec', 'Art', 'Clause', 'Para')):
+                        # This might be a continuation, try to merge with previous
+                        if cleaned_sentences:
+                            cleaned_sentences[-1] = cleaned_sentences[-1] + " " + sentence
+                        else:
+                            cleaned_sentences.append(sentence)
+                    else:
+                        cleaned_sentences.append(sentence)
+            
+            return cleaned_sentences if cleaned_sentences else [text]
+            
         except Exception as e:
             logging.warning(f"Sentence splitting failed: {e}")
             return [text]

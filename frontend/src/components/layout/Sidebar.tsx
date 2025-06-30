@@ -46,7 +46,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="bg-blue-600 p-2 rounded-lg">
               <Scale className="h-6 w-6 text-white" />
             </div>
-            <span className="text-xl font-bold text-gray-900 dark:text-white">JuriSense</span>
+            <span className="text-xl font-bold text-gray-900 dark:text-white">LawInsight</span>
           </div>
         )}
         <button

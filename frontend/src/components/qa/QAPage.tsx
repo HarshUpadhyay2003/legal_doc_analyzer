@@ -145,7 +145,7 @@ export const QAPage: React.FC = () => {
         </CardHeader>
         <CardContent>
           <select
-            className="w-full border rounded p-2 mb-2"
+            className="w-full border rounded p-2 mb-2 bg-white text-black dark:bg-gray-800 dark:text-white dark:border-gray-600"
             value={selectedDocId ?? ''}
             onChange={e => setSelectedDocId(Number(e.target.value) || null)}
           >

@@ -54,7 +54,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister, onLogi
         if (data.email) localStorage.setItem('email', data.email);
         toast({
           title: "Login Successful",
-          description: "Welcome to JuriSense!",
+          description: "Welcome to LawInsight!",
         });
         onLoginSuccess(data.access_token);
       } else {
@@ -85,7 +85,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister, onLogi
             <Scale className="h-8 w-8 text-white" />
           </div>
         </div>
-        <CardTitle className="text-2xl font-bold text-gray-900">JuriSense</CardTitle>
+        <CardTitle className="text-2xl font-bold text-gray-900">LawInsight</CardTitle>
         <CardDescription className="text-gray-600">
           Sign in to your Legal Document Analyzer
         </CardDescription>

@@ -133,6 +133,27 @@ def migrate_add_user_id_to_documents():
 # Call migration on import
 migrate_add_user_id_to_documents()
 
+def migrate_add_phone_company_to_users():
+    """Add phone and company columns to users table if they don't exist."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(users)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if 'phone' not in columns:
+            cursor.execute('ALTER TABLE users ADD COLUMN phone TEXT')
+        if 'company' not in columns:
+            cursor.execute('ALTER TABLE users ADD COLUMN company TEXT')
+        conn.commit()
+    except Exception as e:
+        logging.error(f"Migration error: {str(e)}")
+        raise
+    finally:
+        conn.close()
+
+# Call migration on import
+migrate_add_phone_company_to_users()
+
 def save_document(title, full_text, summary, clauses, features, context_analysis, file_path, user_id):
     """Save a document to the database, associated with a user_id"""
     try:
@@ -205,6 +226,89 @@ def delete_document(doc_id):
         return file_path
     except Exception as e:
         logging.error(f"Error deleting document {doc_id}: {str(e)}")
+        raise
+    finally:
+        conn.close()
+
+def search_questions_answers(query, user_id=None):
+    conn = get_db_connection()
+    c = conn.cursor()
+    try:
+        sql = '''
+            SELECT id, document_id, question, answer, created_at
+            FROM question_answers
+            WHERE (question LIKE ? OR answer LIKE ?)
+        '''
+        params = [f'%{query}%', f'%{query}%']
+        if user_id is not None:
+            sql += ' AND user_id = ?'
+            params.append(user_id)
+        sql += ' ORDER BY created_at DESC'
+        c.execute(sql, params)
+        results = []
+        for row in c.fetchall():
+            results.append({
+                'id': row[0],
+                'document_id': row[1],
+                'question': row[2],
+                'answer': row[3],
+                'created_at': row[4]
+            })
+        return results
+    except Exception as e:
+        logging.error(f"Error searching questions/answers: {str(e)}")
+        raise
+    finally:
+        conn.close()
+
+def get_user_profile(username):
+    """Fetch user profile details by username."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT username, email, phone, company FROM users WHERE username = ?', (username,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except Exception as e:
+        logging.error(f"Error fetching user profile: {str(e)}")
+        raise
+    finally:
+        conn.close()
+
+def update_user_profile(username, email, phone, company):
+    """Update user profile details."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE users SET email = ?, phone = ?, company = ? WHERE username = ?
+        ''', (email, phone, company, username))
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception as e:
+        logging.error(f"Error updating user profile: {str(e)}")
+        raise
+    finally:
+        conn.close()
+
+def change_user_password(username, current_password, new_password):
+    """Change user password if current password matches."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT password_hash FROM users WHERE username = ?', (username,))
+        row = cursor.fetchone()
+        if not row:
+            return False, 'User not found'
+        from werkzeug.security import check_password_hash, generate_password_hash
+        if not check_password_hash(row[0], current_password):
+            return False, 'Current password is incorrect'
+        new_hash = generate_password_hash(new_password)
+        cursor.execute('UPDATE users SET password_hash = ? WHERE username = ?', (new_hash, username))
+        conn.commit()
+        return True, 'Password updated successfully'
+    except Exception as e:
+        logging.error(f"Error changing password: {str(e)}")
         raise
     finally:
         conn.close()
