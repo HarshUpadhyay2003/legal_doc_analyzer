@@ -23,6 +23,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { useNavigate } from 'react-router-dom';
 
 interface HeaderProps {
   onToggleSidebar: () => void;
@@ -38,6 +39,7 @@ export const Header: React.FC<HeaderProps> = ({ onToggleSidebar, sidebarCollapse
   const email = localStorage.getItem('email') || '';
   const [isNotificationsOpen, setNotificationsOpen] = useState(false);
   const [isHelpOpen, setHelpOpen] = useState(false);
+  const navigate = useNavigate();
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,12 +52,8 @@ export const Header: React.FC<HeaderProps> = ({ onToggleSidebar, sidebarCollapse
     // Implement notification panel here
   };
 
-  const handleProfileClick = () => {
-    console.log('Opening profile');
-  };
-
   const handleSettingsClick = () => {
-    console.log('Opening settings');
+    navigate('/settings');
   };
 
   const handleHelpClick = () => {
@@ -139,10 +137,6 @@ export const Header: React.FC<HeaderProps> = ({ onToggleSidebar, sidebarCollapse
               {email && <p className="text-xs text-gray-500 dark:text-gray-400">{email}</p>}
             </div>
             <DropdownMenuSeparator className="dark:bg-gray-700" />
-            <DropdownMenuItem onClick={handleProfileClick} className="dark:text-white dark:hover:bg-gray-700">
-              <User className="mr-2 h-4 w-4" />
-              Profile
-            </DropdownMenuItem>
             <DropdownMenuItem onClick={handleSettingsClick} className="dark:text-white dark:hover:bg-gray-700">
               <Settings className="mr-2 h-4 w-4" />
               Settings

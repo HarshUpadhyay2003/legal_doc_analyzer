@@ -72,11 +72,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <li key={item.id}>
                 <button
                   onClick={() => onNavigate(item.id)}
-                  className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-colors ${
-                    isActive
+                  className={`flex items-center 
+                    ${collapsed ? 'w-8 h-8 p-0 justify-center' : 'w-full px-3 py-2'}
+                    rounded-lg text-left
+                    ${isActive
                       ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-700'
                       : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                  }`}
+                    }`
+                  }
                   title={collapsed ? item.label : undefined}
                 >
                   <Icon className={`h-5 w-5 ${isActive ? 'text-blue-700 dark:text-blue-300' : 'text-gray-500 dark:text-gray-400'}`} />
