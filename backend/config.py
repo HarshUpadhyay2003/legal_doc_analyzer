@@ -10,12 +10,15 @@ class Config:
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=1)
     
     # Database config
-    DATABASE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'legal_docs.db')
+    SQLALCHEMY_DATABASE_URI = os.environ.get(
+        "DATABASE_URL",
+        "sqlite:///" + os.path.join(os.path.dirname(os.path.abspath(__file__)), 'legal_docs.db')
+    )
     
     # Model config
     MODEL_CACHE_SIZE = 1000
-    MAX_CONTEXT_LENGTH = 512
-    MAX_ANSWER_LENGTH = 128
+    MAX_CONTEXT_LENGTH = 1028
+    MAX_ANSWER_LENGTH = 256
     
     # CORS config
     CORS_ORIGINS = os.environ.get('CORS_ORIGINS', '*').split(',')
@@ -39,7 +42,7 @@ class TestingConfig(Config):
     TESTING = True
     DEBUG = True
     # Use in-memory database for testing
-    DATABASE_PATH = ':memory:'
+    SQLALCHEMY_DATABASE_URI = 'sqlite:///:memory:'
 
 # Configuration dictionary
 config = {
