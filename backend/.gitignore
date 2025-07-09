@@ -13,6 +13,7 @@ env/
 venv/
 instance/
 *.db
+*.env
 
 # OS/Editor
 .DS_Store

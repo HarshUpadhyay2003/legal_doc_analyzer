@@ -18,7 +18,7 @@ interface PreviousQuestion {
   id: number;
   question: string;
   answer: string;
-  timestamp: string;
+  created_at?: string; // Add this
   score?: number;
 }
 
@@ -31,10 +31,12 @@ export const QAPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [previousQuestions, setPreviousQuestions] = useState<PreviousQuestion[]>([]);
   const [isLoadingPrevious, setIsLoadingPrevious] = useState(false);
+  const [isLoadingDocuments, setIsLoadingDocuments] = useState(true); // Add loading state
 
   useEffect(() => {
     const fetchDocuments = async () => {
       setError(null);
+      setIsLoadingDocuments(true); // Set loading
       try {
         const token = localStorage.getItem('jwt_token');
         const response = await fetch(`${BASE_API_URL}/documents`, {
@@ -47,6 +49,8 @@ export const QAPage: React.FC = () => {
         setDocuments(docs.map((doc: any) => ({ id: doc.id, title: doc.title })));
       } catch (err: any) {
         setError(err.message || 'Error fetching documents.');
+      } finally {
+        setIsLoadingDocuments(false); // Done loading
       }
     };
     fetchDocuments();
@@ -128,7 +132,9 @@ export const QAPage: React.FC = () => {
   };
 
   const formatTimestamp = (timestamp: string) => {
-    return new Date(timestamp).toLocaleString();
+    if (!timestamp) return '';
+    const date = new Date(timestamp);
+    return isNaN(date.getTime()) ? '' : date.toLocaleString();
   };
 
   return (
@@ -144,16 +150,21 @@ export const QAPage: React.FC = () => {
           <CardTitle>Select Document</CardTitle>
         </CardHeader>
         <CardContent>
-          <select
-            className="w-full border rounded p-2 mb-2 bg-white text-black dark:bg-gray-800 dark:text-white dark:border-gray-600"
-            value={selectedDocId ?? ''}
-            onChange={e => setSelectedDocId(Number(e.target.value) || null)}
-          >
-            <option value="">-- Select a document --</option>
-            {documents.map(doc => (
-              <option key={doc.id} value={doc.id}>{doc.title}</option>
-            ))}
-          </select>
+          {isLoadingDocuments ? (
+            <div className="text-gray-500">Loading documents...</div>
+          ) : (
+            <select
+              className="w-full border rounded p-2 mb-2 bg-white text-black dark:bg-gray-800 dark:text-white dark:border-gray-600"
+              value={selectedDocId ?? ''}
+              onChange={e => setSelectedDocId(Number(e.target.value) || null)}
+              disabled={isLoadingDocuments || documents.length === 0}
+            >
+              <option value="">-- Select a document --</option>
+              {documents.map(doc => (
+                <option key={doc.id} value={doc.id}>{doc.title}</option>
+              ))}
+            </select>
+          )}
         </CardContent>
       </Card>
 
@@ -238,7 +249,7 @@ export const QAPage: React.FC = () => {
                           <div className="flex items-center gap-2 mt-1">
                             <Clock className="h-3 w-3 text-muted-foreground" />
                             <span className="text-xs text-muted-foreground">
-                              {formatTimestamp(prevQ.timestamp)}
+                              {formatTimestamp(prevQ.created_at)}
                             </span>
                             {prevQ.score !== undefined && (
                               <Badge variant="secondary" className="text-xs">

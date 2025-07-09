@@ -230,7 +230,7 @@ export default function Welcome() {
           <p style={{ fontSize: '1.15rem', marginBottom: '1.5rem' }}>
             <strong>We're delighted to have you here.</strong>
           </p>
-          <p style={{ fontSize: '1.05rem', lineHeight: 1.7, marginBottom: '1.5rem' }}>
+          <div style={{ fontSize: '1.05rem', lineHeight: 1.7, marginBottom: '1.5rem' }}>
             JuriSense is your AI-powered legal assistant, designed to make legal document analysis, question answering, and contract management effortless.<br/><br/>
             <ul style={{ textAlign: 'left', display: 'inline-block', margin: '0 auto 1.5rem', paddingLeft: 0 }}>
               <li>• Instantly upload and review legal documents</li>
@@ -240,7 +240,7 @@ export default function Welcome() {
             </ul>
             <br/>
             Whether you're a legal professional, business owner, or just someone who wants clarity, JuriSense is here to help you turn legal complexity into clarity—instantly.
-          </p>
+          </div>
         </div>
       </div>
     </>

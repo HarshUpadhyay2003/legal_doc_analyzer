@@ -1,10 +1,10 @@
 import os
-from flask import Blueprint, request, jsonify, send_from_directory, current_app
+from flask import Blueprint, request, jsonify, send_file
 from werkzeug.utils import secure_filename
 from app.utils.extract_text import extract_text_from_pdf
 from app.utils.summarizer import generate_summary
 from app.utils.clause_detector import detect_clauses
-from app.database import save_document, delete_document
+from app.database import save_document, delete_document, Document
 from app.database import get_all_documents, get_document_by_id
 from app.database import search_documents, save_question_answer, search_questions_answers
 from app.nlp.qa import answer_question
@@ -20,7 +20,14 @@ import textract
 from app.database import get_user_profile, update_user_profile, change_user_password
 from app.database import SessionLocal, User
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import or_
+from sqlalchemy import or_, Index
+import io
+from datetime import datetime, timedelta, timezone
+from sqlalchemy import Column, Integer, String, Text, DateTime, LargeBinary, func
+from sqlalchemy.orm import relationship
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import create_engine
+from sqlalchemy.pool import NullPool
 
 main = Blueprint("main", __name__)
 
@@ -29,12 +36,7 @@ enhanced_legal_processor = EnhancedLegalProcessor()
 legal_domain_processor = LegalDomainFeatures()
 context_processor = ContextUnderstanding()
 
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
-
-# Ensure the upload folder exists
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
+# Remove UPLOAD_FOLDER, file_path, and local file logic
 
 ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx'}
 
@@ -74,8 +76,7 @@ def upload_file():
         if not (file.filename.lower().endswith('.pdf')):
             return jsonify({'error': 'File type not allowed. Only PDF files are supported.'}), 400
         filename = secure_filename(file.filename)
-        file_path = os.path.join(UPLOAD_FOLDER, filename)
-        file.save(file_path)
+        file_content = file.read()  # Read file content as bytes
         identity = get_jwt_identity()
         user_id = get_user_id_by_username(identity)
         if not user_id:
@@ -87,7 +88,7 @@ def upload_file():
             clauses="[]",
             features="{}",
             context_analysis="{}",
-            file_path=file_path,
+            file_data=file_content,  # Store file in DB
             user_id=user_id
         )
         return jsonify({
@@ -103,9 +104,27 @@ def upload_file():
 @main.route('/documents', methods=['GET'])
 @jwt_required()
 def list_documents():
+    page = int(request.args.get('page', 1))
+    limit = int(request.args.get('limit', 20))
+    offset = (page - 1) * limit
     try:
-        docs = get_all_documents()
-        return jsonify(docs), 200
+        identity = get_jwt_identity()
+        user_id = get_user_id_by_username(identity)
+        session = SessionLocal()
+        query = session.query(Document).filter(Document.user_id == user_id).order_by(Document.upload_time.desc())
+        documents = query.offset(offset).limit(limit).all()
+        result = []
+        for doc in documents:
+            result.append({
+                'id': doc.id,
+                'title': doc.title,
+                'summary': doc.summary,
+                'file_size': doc.file_size,
+                'upload_time': doc.upload_time.isoformat() if doc.upload_time else None,
+                'type': doc.title.split('.')[-1].upper() if '.' in doc.title else 'UNKNOWN',
+            })
+        session.close()
+        return jsonify(result), 200
     except Exception as e:
         logging.error(f"Error listing documents: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
@@ -123,31 +142,49 @@ def get_document(doc_id):
         logging.error(f"Error getting document {doc_id}: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-@main.route('/documents/download/<filename>', methods=['GET'])
+@main.route('/documents/download/<int:doc_id>', methods=['GET'])
 @jwt_required()
-def download_document(filename):
+def download_document(doc_id):
     try:
-        return send_from_directory(UPLOAD_FOLDER, filename, as_attachment=True)
+        session = SessionLocal()
+        doc = session.query(Document).filter(Document.id == doc_id).first()
+        session.close()
+        if not doc or not doc.file_data:
+            return jsonify({"error": "File not found"}), 404
+        return send_file(
+            io.BytesIO(doc.file_data),
+            as_attachment=True,
+            download_name=doc.title,
+            mimetype='application/pdf'
+        )
     except Exception as e:
-        logging.error(f"Error downloading file {filename}: {str(e)}", exc_info=True)
+        logging.error(f"Error downloading file: {str(e)}", exc_info=True)
         return jsonify({"error": f"Error downloading file: {str(e)}"}), 500
 
-@main.route('/documents/view/<filename>', methods=['GET'])
+@main.route('/documents/view/<int:doc_id>', methods=['GET'])
 @jwt_required()
-def view_document(filename):
+def view_document(doc_id):
     try:
-        return send_from_directory(UPLOAD_FOLDER, filename)
+        session = SessionLocal()
+        doc = session.query(Document).filter(Document.id == doc_id).first()
+        session.close()
+        if not doc or not doc.file_data:
+            return jsonify({"error": "File not found"}), 404
+        return send_file(
+            io.BytesIO(doc.file_data),
+            as_attachment=False,
+            download_name=doc.title,
+            mimetype='application/pdf'
+        )
     except Exception as e:
-        logging.error(f"Error viewing file {filename}: {str(e)}", exc_info=True)
+        logging.error(f"Error viewing file: {str(e)}", exc_info=True)
         return jsonify({"error": f"Error viewing file: {str(e)}"}), 500
 
 @main.route('/documents/<int:doc_id>', methods=['DELETE'])
 @jwt_required()
 def delete_document_route(doc_id):
     try:
-        file_path_to_delete = delete_document(doc_id)
-        if file_path_to_delete and os.path.exists(file_path_to_delete):
-            os.remove(file_path_to_delete)
+        delete_document(doc_id)
         return jsonify({"success": True, "message": "Document deleted successfully"}), 200
     except Exception as e:
         logging.error(f"Error deleting document {doc_id}: {str(e)}", exc_info=True)
@@ -207,30 +244,31 @@ def login():
 @jwt_required()
 def process_document(doc_id):
     try:
-        document = get_document_by_id(doc_id)
-        if not document:
+        session = SessionLocal()
+        doc = session.query(Document).filter(Document.id == doc_id).first()
+        if not doc:
+            session.close()
             return jsonify({'error': 'Document not found'}), 404
-        file_path = document['file_path']
-        text = extract_text_from_file(file_path)
+        if not doc.file_data:
+            session.close()
+            return jsonify({'error': 'File not found for this document'}), 404
+        # Extract text from file_data
+        text = extract_text_from_pdf(io.BytesIO(doc.file_data))
         if not text:
+            session.close()
             return jsonify({'error': 'Could not extract text from file'}), 400
         summary = generate_summary(text)
         clauses = detect_clauses(text)
         features = legal_domain_processor.process_legal_document(text)
         context_analysis = context_processor.analyze_context(text)
         # Update the document with processed content
-        session = SessionLocal()
-        try:
-            doc = session.query(User).get(doc_id)
-            if doc:
-                doc.full_text = text
-                doc.summary = summary
-                doc.clauses = str(clauses)
-                doc.features = str(features)
-                doc.context_analysis = str(context_analysis)
-                session.commit()
-        finally:
-            session.close()
+        doc.full_text = text
+        doc.summary = summary
+        doc.clauses = str(clauses)
+        doc.features = str(features)
+        doc.context_analysis = str(context_analysis)
+        session.commit()
+        session.close()
         return jsonify({
             'message': 'Document processed successfully',
             'document_id': doc_id,
@@ -244,30 +282,41 @@ def process_document(doc_id):
 @jwt_required()
 def generate_document_summary(doc_id):
     try:
-        doc = get_document_by_id(doc_id)
-        if not doc:
-            return jsonify({"error": "Document not found"}), 404
-        summary = doc.get('summary', '')
-        if summary and summary.strip() and summary != 'Processing...':
-            return jsonify({"summary": summary}), 200
-        file_path = doc.get('file_path', '')
-        if not file_path or not os.path.exists(file_path):
-            return jsonify({"error": "File not found for this document"}), 404
-        text = extract_text_from_file(file_path)
-        if not text.strip():
-            return jsonify({"error": "No text available for summarization"}), 400
-        summary = generate_summary(text)
-        # Save the summary to the database
         session = SessionLocal()
-        try:
-            document = session.query(User).get(doc_id)
-            if document:
-                document.summary = summary
-                session.commit()
-        finally:
+        doc = session.query(Document).filter(Document.id == doc_id).first()
+        if not doc:
             session.close()
+            return jsonify({"error": "Document not found"}), 404
+        summary = doc.summary
+        if summary and summary.strip() and summary != 'Processing...':
+            session.close()
+            return jsonify({"summary": summary}), 200
+        if not doc.file_data:
+            session.close()
+            return jsonify({"error": "File not found for this document"}), 404
+        # Extract text from file_data
+        try:
+            text = extract_text_from_pdf(io.BytesIO(doc.file_data))
+        except Exception as e:
+            session.close()
+            logging.error(f"Error extracting text from PDF: {e}")
+            return jsonify({"error": f"Error extracting text from PDF: {e}"}), 500
+        if not text.strip():
+            session.close()
+            return jsonify({"error": "No text available for summarization"}), 400
+        try:
+            summary = generate_summary(text)
+        except Exception as e:
+            session.close()
+            logging.error(f"Error generating summary: {e}")
+            return jsonify({"error": f"Error generating summary: {e}"}), 500
+        # Save the summary to the database
+        doc.summary = summary
+        session.commit()
+        session.close()
         return jsonify({"summary": summary}), 200
     except Exception as e:
+        logging.error(f"Error in generate_document_summary: {e}", exc_info=True)
         return jsonify({"error": f"Error generating summary: {str(e)}"}), 500
 
 @main.route('/ask-question', methods=['POST', 'OPTIONS'])
@@ -390,10 +439,24 @@ def dashboard_stats():
         processed_documents = sum(1 for doc in documents if doc.get('summary') and doc.get('summary') != 'Processing...')
         pending_analysis = total_documents - processed_documents
         qa_results = search_questions_answers('', user_id=user_id)
-        from datetime import datetime, timedelta
         now = datetime.utcnow()
         last_30_days = now - timedelta(days=30)
-        recent_questions = sum(1 for q in qa_results if q['created_at'] and q['created_at'] >= last_30_days)
+        def parse_dt(val):
+            if isinstance(val, datetime):
+                # Convert to naive UTC
+                if val.tzinfo is not None:
+                    return val.astimezone(timezone.utc).replace(tzinfo=None)
+                return val
+            if isinstance(val, str):
+                try:
+                    dt = datetime.fromisoformat(val)
+                    if dt.tzinfo is not None:
+                        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+                    return dt
+                except Exception:
+                    return None
+            return None
+        recent_questions = sum(1 for q in qa_results if q['created_at'] and parse_dt(q['created_at']) and parse_dt(q['created_at']) >= last_30_days)
         return jsonify({
             'total_documents': total_documents,
             'processed_documents': processed_documents,

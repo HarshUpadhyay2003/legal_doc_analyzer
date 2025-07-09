@@ -1,15 +1,24 @@
 # All sqlite3 and local DB logic will be removed and replaced with SQLAlchemy/Postgres in the next step.
 # This file will be refactored to use SQLAlchemy models and sessions.
 
-from sqlalchemy import create_engine, Column, Integer, String, Text, Float, ForeignKey, DateTime
+from sqlalchemy import create_engine, Column, Integer, String, Text, Float, ForeignKey, DateTime, LargeBinary
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from sqlalchemy.sql import func
 import os
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
+from dotenv import load_dotenv
+import re
+
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
+print("DEBUG: DATABASE_URL from os.environ:", os.environ.get('DATABASE_URL'))
 
 # SQLAlchemy setup
 DATABASE_URL = os.environ.get('DATABASE_URL')
+
+if not DATABASE_URL or DATABASE_URL.strip() == "":
+    raise ValueError("DATABASE_URL is not set or is empty. Please set it as an environment variable or in your .env file for NeonDB.")
+
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -37,7 +46,8 @@ class Document(Base):
     clauses = Column(Text)
     features = Column(Text)
     context_analysis = Column(Text)
-    file_path = Column(String)
+    file_data = Column(LargeBinary)  # Store file content in DB
+    file_size = Column(Integer)  # Add this
     upload_time = Column(DateTime(timezone=True), server_default=func.now())
     user_id = Column(Integer, ForeignKey('users.id'))
     user = relationship('User', back_populates='documents')
@@ -63,7 +73,7 @@ def get_db_session():
     return SessionLocal()
 
 # --- Document CRUD ---
-def save_document(title, full_text, summary, clauses, features, context_analysis, file_path, user_id):
+def save_document(title, full_text, summary, clauses, features, context_analysis, file_data, user_id):
     session = get_db_session()
     try:
         doc = Document(
@@ -73,7 +83,8 @@ def save_document(title, full_text, summary, clauses, features, context_analysis
             clauses=str(clauses),
             features=str(features),
             context_analysis=str(context_analysis),
-            file_path=file_path,
+            file_data=file_data,
+            file_size=len(file_data) if file_data else 0,  # Store file size
             user_id=user_id
         )
         session.add(doc)
@@ -96,6 +107,9 @@ def get_all_documents(user_id=None):
         for doc in documents:
             d = doc.__dict__.copy()
             d.pop('_sa_instance_state', None)
+            d.pop('file_data', None)  # Don't return file data in list
+            # Do NOT pop 'summary'; keep it in the result
+            # file_size is included
             result.append(d)
         return result
     finally:
@@ -111,6 +125,8 @@ def get_document_by_id(doc_id, user_id=None):
         if doc:
             d = doc.__dict__.copy()
             d.pop('_sa_instance_state', None)
+            # Don't return file_data by default
+            d.pop('file_data', None)
             return d
         return None
     finally:
@@ -120,11 +136,10 @@ def delete_document(doc_id):
     session = get_db_session()
     try:
         doc = session.query(Document).filter(Document.id == doc_id).first()
-        file_path = doc.file_path if doc else None
         if doc:
             session.delete(doc)
             session.commit()
-        return file_path
+        return True
     finally:
         session.close()
 
@@ -164,13 +179,22 @@ def search_questions_answers(query, user_id=None):
                 'document_id': row.document_id,
                 'question': row.question,
                 'answer': row.answer,
-                'created_at': row.created_at
+                'created_at': row.created_at.isoformat() if row.created_at else None,
             })
         return results
     finally:
         session.close()
 
+def clean_answer(answer):
+    # Remove patterns like (3), extra spaces, and leading/trailing punctuation
+    answer = re.sub(r'\(\d+\)', '', answer)
+    answer = re.sub(r'\s+', ' ', answer)
+    answer = answer.strip(' ,.;:')
+    return answer
+
 def save_question_answer(document_id, user_id, question, answer, score):
+    score = float(score)  # Convert np.float64 to Python float
+    answer = clean_answer(answer)  # Clean up answer format
     session = get_db_session()
     try:
         qa = QuestionAnswer(

@@ -50,7 +50,9 @@ interface Document {
   status: string;
   size: string;
   type: string;
-  file_path?: string; // Add file_path from backend
+  summary?: string;
+  file_size?: number; // Add this
+  file_path?: string;
 }
 
 function formatFileSize(bytes: number): string {
@@ -85,6 +87,8 @@ export const DocumentsPage: React.FC = () => {
   const [recentOnly, setRecentOnly] = useState(false);
   const [recentDocs, setRecentDocs] = useState<number[]>([]); // store recently accessed doc IDs
   const { getSummary } = useSummary();
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
 
   const getAuthHeader = () => {
     const token = localStorage.getItem('jwt_token');
@@ -95,7 +99,8 @@ export const DocumentsPage: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchDocuments();
+    fetchDocuments(1);
+    setPage(1);
   }, []);
 
   useEffect(() => {
@@ -105,26 +110,22 @@ export const DocumentsPage: React.FC = () => {
     }
   }, [isViewDialogOpen, pdfUrl]);
 
-  const fetchDocuments = async () => {
+  const fetchDocuments = async (pageNum = 1) => {
     setIsLoadingDocuments(true);
     try {
-      const response = await fetch(`${BASE_API_URL}/documents`, {
+      const response = await fetch(`${BASE_API_URL}/documents?page=${pageNum}&limit=20`, {
         headers: getAuthHeader(),
       });
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       const data = await response.json();
-      const formattedDocs: Document[] = data.map((doc: any) => ({
-        id: doc.id,
-        title: doc.title,
-        upload_time: new Date(doc.upload_time).toLocaleDateString(),
-        status: 'Processed',
-        size: doc.size ? formatFileSize(doc.size) : 'N/A',
-        type: doc.title.split('.').pop()?.toUpperCase() || 'Unknown',
-        file_path: doc.file_path,
-      }));
-      setDocuments(formattedDocs);
+      if (pageNum === 1) {
+        setDocuments(data);
+      } else {
+        setDocuments(prev => [...prev, ...data]);
+      }
+      setHasMore(data.length === 20); // If less than limit, no more pages
     } catch (error) {
       console.error("Error fetching documents:", error);
       toast({
@@ -244,6 +245,9 @@ export const DocumentsPage: React.FC = () => {
   };
 
   const getStatusBadge = (doc: Document) => {
+    if (doc.summary && doc.summary.trim() && doc.summary !== 'Processing...') {
+      return { label: 'Processed', className: 'bg-green-100 text-green-800' };
+    }
     const summary = getSummary(doc.id);
     if (!summary || (!summary.content && !summary.isLoading)) {
       return { label: 'Unprocessed', className: 'bg-gray-100 text-gray-800' };
@@ -268,7 +272,8 @@ export const DocumentsPage: React.FC = () => {
 
     try {
       const token = localStorage.getItem('jwt_token');
-      const response = await fetch(`${BASE_API_URL}/documents/view/${doc.title}`, {
+      // Use doc.id instead of doc.title
+      const response = await fetch(`${BASE_API_URL}/documents/view/${doc.id}`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -365,17 +370,17 @@ export const DocumentsPage: React.FC = () => {
   };
 
   const handleDownload = async (doc: Document) => {
-    if (!doc.title) {
+    if (!doc.id) {
       toast({
         title: "Download Failed",
-        description: "Document title is missing.",
+        description: "Document ID is missing.",
         variant: "destructive",
       });
       return;
     }
-    
     try {
-      const response = await fetch(`${BASE_API_URL}/documents/download/${doc.title}`, {
+      // Use doc.id instead of doc.title
+      const response = await fetch(`${BASE_API_URL}/documents/download/${doc.id}`, {
         headers: getAuthHeader(),
       });
 
@@ -408,10 +413,41 @@ export const DocumentsPage: React.FC = () => {
     }
   };
 
-  const handleViewSummary = (doc: Document) => {
+  // Only fetch and display full summary when user requests it (handleViewSummary)
+  const handleViewSummary = async (doc: Document) => {
     setSummaryDoc(doc);
     setIsSummaryDialogOpen(true);
     setIsSummaryMinimized(false);
+    // If summary is not present, fetch it
+    if (!doc.summary || doc.summary.trim() === '' || doc.summary === 'Processing...') {
+      try {
+        const token = localStorage.getItem('jwt_token');
+        const response = await fetch(`${BASE_API_URL}/documents/summary/${doc.id}`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        if (response.ok) {
+          const data = await response.json();
+          // Update the summary in the document state
+          setDocuments(prevDocs => prevDocs.map(d => d.id === doc.id ? { ...d, summary: data.summary } : d));
+          setSummaryDoc(prev => prev ? { ...prev, summary: data.summary } : prev);
+        } else {
+          toast({
+            title: "Summary Error",
+            description: "Failed to fetch summary.",
+            variant: "destructive",
+          });
+        }
+      } catch (error) {
+        toast({
+          title: "Summary Error",
+          description: "An error occurred while fetching the summary.",
+          variant: "destructive",
+        });
+      }
+    }
   };
 
   const handleCopySummary = () => {
@@ -439,6 +475,14 @@ export const DocumentsPage: React.FC = () => {
     if (searchTerm && !doc.title.toLowerCase().includes(searchTerm.toLowerCase()) && !doc.type.toLowerCase().includes(searchTerm.toLowerCase())) return false;
     return true;
   });
+
+  const loadMoreDocuments = () => {
+    if (hasMore && !isLoadingDocuments) {
+      const nextPage = page + 1;
+      fetchDocuments(nextPage);
+      setPage(nextPage);
+    }
+  };
 
   return (
     <div className="p-6 space-y-6">
@@ -588,6 +632,9 @@ export const DocumentsPage: React.FC = () => {
                 ))}
               </TableBody>
             </Table>
+          )}
+          {hasMore && !isLoadingDocuments && (
+            <Button onClick={loadMoreDocuments} className="mt-4 w-full">Load More</Button>
           )}
         </CardContent>
       </Card>
