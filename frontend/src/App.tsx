@@ -27,7 +27,7 @@ const AuthWrapper = ({ onLoginSuccess, initialForm }: { onLoginSuccess: (token: 
 
   const handleSwitchToRegister = () => {
     setCurrentForm('register');
-    navigate('/');
+    navigate('/register'); // Go to /register
   };
 
   const handleSwitchToLogin = () => {
@@ -106,10 +106,11 @@ const App = () => {
             <Routes>
               {!isAuthenticated ? (
                 <>
-                  <Route path="/" element={<Welcome />} />
+                  <Route path="/welcome" element={<Welcome />} />
                   <Route path="/login" element={<AuthWrapper onLoginSuccess={handleLogin} initialForm="login" />} />
                   <Route path="/register" element={<AuthWrapper onLoginSuccess={handleLogin} initialForm="register" />} />
-                  <Route path="*" element={<Navigate to="/" replace />} />
+                  <Route path="/" element={<Navigate to="/welcome" replace />} />
+                  <Route path="*" element={<Navigate to="/welcome" replace />} />
                 </>
               ) : (
                 <>
